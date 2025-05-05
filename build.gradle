@@ -1,5 +1,6 @@
 plugins {
-    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
 }
 
 group = 'org.example'
@@ -9,7 +10,17 @@ repositories {
     mavenCentral()
 }
 
+application {
+    mainClass = 'App'
+}
+
+javafx {
+    version = "21.0.5"
+    modules = [ 'javafx.controls' ]
+}
+
 dependencies {
+    implementation 'com.h2database:h2:2.2.224'
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
 }
