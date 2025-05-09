@@ -11,15 +11,15 @@ public class TestRepository {
     public void test() {
         try {
             Connection connection = DatabaseConnector.getConnection();
-            System.out.println("H2 데이터베이스 연결 성공!");
+            System.out.println("MySQL 데이터베이스 연결 성공!");
 
-            // 테이블 생성 예제
+            // 테이블 생성 예제 (MySQL 문법으로 수정)
             Statement statement = connection.createStatement();
-            statement.execute("CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY, name VARCHAR(255))");
+            statement.execute("CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255))");
 
             // 데이터 삽입 예제
-            statement.execute("INSERT INTO users VALUES (1, '사용자1')");
-            statement.execute("INSERT INTO users VALUES (2, '사용자2')");
+            statement.execute("INSERT INTO users (name) VALUES ('사용자1')");
+            statement.execute("INSERT INTO users (name) VALUES ('사용자2')");
 
             // 데이터 조회 예제
             ResultSet resultSet = statement.executeQuery("SELECT * FROM users");
