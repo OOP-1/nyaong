@@ -34,7 +34,7 @@ public class TestRepository {
             statement.close();
             connection.close();
         } catch (SQLException e) {
-            throw new RuntimeException(e.getMessage());
+            throw new RuntimeException(e);
         }
     }
 }
