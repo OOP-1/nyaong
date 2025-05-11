@@ -11,7 +11,7 @@ repositories {
 }
 
 application {
-    mainClass = 'App'
+    mainClass = 'org.example.App'
 }
 
 javafx {
@@ -29,4 +29,13 @@ dependencies {
 
 test {
     useJUnitPlatform()
+}
+
+// 두 번째 인스턴스 실행을 위한 태스크 추가
+task runSecondInstance(type: JavaExec) {
+    group = 'application'
+    description = 'Runs the second instance of the application'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.example.App'
+    args = ['--second-window']
 }

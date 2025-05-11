@@ -8,6 +8,9 @@ import org.example.view.LoginView;
 
 public class JavaFX extends Application {
 
+    // 두 번째 창인지 확인하는 플래그
+    private static boolean isSecondWindow = false;
+
     @Override
     public void start(Stage stage) {
         try {
@@ -17,6 +20,12 @@ public class JavaFX extends Application {
                 System.err.println("데이터베이스 초기화에 실패했습니다. 기본 화면을 표시합니다.");
                 showDefaultView(stage);
                 return;
+            }
+
+            // 두 번째 창이면 창 위치와 제목 조정
+            if (isSecondWindow) {
+                stage.setX(800); // 오른쪽으로 이동
+                stage.setTitle("Nyaong Chat - 두 번째 창");
             }
 
             // 로그인 화면 표시
@@ -45,6 +54,14 @@ public class JavaFX extends Application {
     }
 
     public static void main(String[] args) {
-        launch();
+        // 커맨드 라인 인자 확인
+        for (String arg : args) {
+            if (arg.equals("--second-window")) {
+                isSecondWindow = true;
+                break;
+            }
+        }
+
+        launch(args);
     }
 }

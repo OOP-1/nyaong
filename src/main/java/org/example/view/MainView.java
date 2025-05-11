@@ -1,21 +1,39 @@
 package org.example.view;
 
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
 import javafx.stage.Stage;
+import javafx.util.Duration;
+import org.example.model.FriendRequest;
 import org.example.model.Member;
 import org.example.service.AuthService;
+import org.example.service.FriendService;
+
+import java.util.List;
 
 public class MainView {
     private final Stage stage;
     private final Member currentUser;
+    private FriendsView friendsView;
+    private final FriendService friendService;
+    private Tab friendsTab;
+    private Circle notificationBadge;
+    private Timeline checkFriendRequestsTimeline;
 
     public MainView(Stage stage) {
         this.stage = stage;
         this.currentUser = AuthService.getCurrentUser(); // 현재 로그인한 사용자 정보
+        this.friendService = new FriendService();
     }
 
     public void show() {
@@ -29,7 +47,7 @@ public class MainView {
         MenuBar menuBar = createMenuBar();
         borderPane.setTop(menuBar);
 
-        // 좌측 사이드바 (친구 목록)
+        // 좌측 사이드바 (친구 목록, 채팅방)
         TabPane sidebarTabs = new TabPane();
         sidebarTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         sidebarTabs.getTabs().addAll(createFriendsTab(), createChatRoomsTab());
@@ -45,9 +63,18 @@ public class MainView {
         borderPane.setCenter(centerContent);
 
         // 장면 생성 및 표시
-        Scene scene = new Scene(borderPane, 800, 600);
+        Scene scene = new Scene(borderPane, 900, 600);
         stage.setScene(scene);
         stage.show();
+
+        // 윈도우 닫기 이벤트 처리 (로그아웃과 자원 해제)
+        stage.setOnCloseRequest(e -> {
+            cleanup();
+            handleLogout();
+        });
+
+        // 친구 요청 알림 확인 타이머 시작
+        startFriendRequestChecker();
     }
 
     private MenuBar createMenuBar() {
@@ -58,7 +85,10 @@ public class MainView {
         MenuItem logoutItem = new MenuItem("로그아웃");
         logoutItem.setOnAction(e -> handleLogout());
         MenuItem exitItem = new MenuItem("종료");
-        exitItem.setOnAction(e -> System.exit(0));
+        exitItem.setOnAction(e -> {
+            cleanup();
+            Platform.exit();
+        });
         fileMenu.getItems().addAll(logoutItem, new SeparatorMenuItem(), exitItem);
 
         // 설정 메뉴
@@ -78,25 +108,35 @@ public class MainView {
     }
 
     private Tab createFriendsTab() {
-        Tab friendsTab = new Tab("친구 목록");
-        VBox content = new VBox(10);
-        content.setPadding(new Insets(10));
+        friendsTab = new Tab();
 
-        // 친구 검색
-        TextField searchField = new TextField();
-        searchField.setPromptText("친구 검색...");
+        // 탭 제목 영역에 알림 배지를 포함시킴
+        StackPane tabHeader = new StackPane();
+        Label titleLabel = new Label("친구 목록");
 
-        // 친구 목록 (임시 데이터)
-        ListView<String> friendsList = new ListView<>();
-        friendsList.getItems().addAll("친구 1", "친구 2", "친구 3");
+        // 알림 배지 (새로운 친구 요청이 있을 때 표시)
+        notificationBadge = new Circle(6, Color.RED);
+        notificationBadge.setTranslateX(30);
+        notificationBadge.setTranslateY(-5);
+        notificationBadge.setVisible(false); // 초기에는 숨김
 
-        // 친구 추가 버튼
-        Button addFriendButton = new Button("친구 추가");
-        addFriendButton.setMaxWidth(Double.MAX_VALUE);
-        addFriendButton.setOnAction(e -> handleAddFriend());
+        tabHeader.getChildren().addAll(titleLabel, notificationBadge);
+        tabHeader.setAlignment(Pos.CENTER_LEFT);
 
-        content.getChildren().addAll(searchField, friendsList, addFriendButton);
-        friendsTab.setContent(content);
+        friendsTab.setGraphic(tabHeader);
+
+        // FriendsView 생성 및 설정
+        friendsView = new FriendsView(stage);
+        friendsTab.setContent(friendsView);
+
+        // 탭 선택 시 이벤트
+        friendsTab.setOnSelectionChanged(event -> {
+            if (friendsTab.isSelected()) {
+                // 탭 선택 시 알림 배지 숨김
+                notificationBadge.setVisible(false);
+            }
+        });
+
         return friendsTab;
     }
 
@@ -117,6 +157,19 @@ public class MainView {
         content.getChildren().addAll(chatRoomsList, createChatRoomButton);
         chatRoomsTab.setContent(content);
         return chatRoomsTab;
+    }
+
+    /**
+     * 자원 해제
+     */
+    private void cleanup() {
+        if (checkFriendRequestsTimeline != null) {
+            checkFriendRequestsTimeline.stop();
+        }
+
+        if (friendsView != null) {
+            friendsView.dispose();
+        }
     }
 
     private void handleLogout() {
@@ -147,23 +200,6 @@ public class MainView {
         alert.showAndWait();
     }
 
-    private void handleAddFriend() {
-        // 친구 추가 다이얼로그 표시
-        TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle("친구 추가");
-        dialog.setHeaderText(null);
-        dialog.setContentText("추가할 친구의 아이디를 입력하세요:");
-
-        dialog.showAndWait().ifPresent(userId -> {
-            // TODO: 친구 추가 기능 구현
-            Alert alert = new Alert(Alert.AlertType.INFORMATION);
-            alert.setTitle("친구 추가");
-            alert.setHeaderText(null);
-            alert.setContentText("친구 추가 기능은 아직 구현되지 않았습니다.");
-            alert.showAndWait();
-        });
-    }
-
     private void handleCreateChatRoom() {
         // 채팅방 생성 다이얼로그 표시
         TextInputDialog dialog = new TextInputDialog();
@@ -179,5 +215,68 @@ public class MainView {
             alert.setContentText("채팅방 생성 기능은 아직 구현되지 않았습니다.");
             alert.showAndWait();
         });
+    }
+
+    // FriendsView 새로고침
+    public void refreshFriendsView() {
+        if (friendsView != null) {
+            friendsView.loadFriends();
+        }
+    }
+
+    /**
+     * 친구 요청 알림 확인 타이머 시작
+     */
+    private void startFriendRequestChecker() {
+        // 10초마다 친구 요청 확인
+        checkFriendRequestsTimeline = new Timeline(
+                new KeyFrame(Duration.seconds(10), event -> checkFriendRequests())
+        );
+        checkFriendRequestsTimeline.setCycleCount(Timeline.INDEFINITE);
+        checkFriendRequestsTimeline.play();
+
+        // 초기 확인
+        checkFriendRequests();
+    }
+
+    /**
+     * 친구 요청 확인
+     */
+    private void checkFriendRequests() {
+        Platform.runLater(() -> {
+            List<FriendRequest> requests = friendService.getPendingFriendRequests(currentUser.getMemberId());
+
+            // 새로운 친구 요청이 있을 경우 알림 표시
+            if (!requests.isEmpty()) {
+                // 알림 배지 표시 (친구 탭이 선택되어 있지 않을 때만)
+                if (!friendsTab.isSelected()) {
+                    notificationBadge.setVisible(true);
+                }
+
+                // 첫 실행이 아니고 새로운 요청이 있는 경우에만 토스트 메시지 표시
+                if (notificationBadge.isVisible()) {
+                    showFriendRequestToast(requests.size());
+                }
+            }
+        });
+    }
+
+    /**
+     * 친구 요청 알림 토스트 표시
+     */
+    private void showFriendRequestToast(int count) {
+        // 토스트 메시지 표시
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("새 친구 요청");
+        alert.setHeaderText(null);
+        alert.setContentText(count + "개의 새로운 친구 요청이 있습니다.");
+
+        // 3초 후 자동으로 닫기
+        Timeline timeline = new Timeline(
+                new KeyFrame(Duration.seconds(3), event -> alert.close())
+        );
+        timeline.play();
+
+        alert.show();
     }
 }
