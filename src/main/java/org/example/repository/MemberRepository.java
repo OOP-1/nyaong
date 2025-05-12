@@ -123,6 +123,41 @@ public class MemberRepository {
         }
     }
 
+    /**
+     * 회원 ID로 회원 정보 조회
+     * @param memberId 회원 ID
+     * @return 회원 정보
+     */
+    public Optional<Member> findById(int memberId) {
+        String sql = "SELECT * FROM Members WHERE member_id = ?";
+
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, memberId);
+
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    Member member = new Member(
+                            rs.getInt("member_id"),
+                            rs.getString("user_id"),
+                            rs.getString("password"),
+                            rs.getString("nickname"),
+                            rs.getString("status"),
+                            rs.getString("role")
+                    );
+                    return Optional.of(member);
+                }
+            }
+
+            return Optional.empty();
+
+        } catch (SQLException e) {
+            System.err.println("회원 조회 중 오류 발생: " + e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     // 전체 회원 목록 조회
     public List<Member> findAll() {
         String sql = "SELECT * FROM Members";
@@ -151,3 +186,4 @@ public class MemberRepository {
         return members;
     }
 }
+

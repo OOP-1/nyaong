@@ -252,7 +252,17 @@ public class FriendsView extends BorderPane {
      * 1:1 채팅 시작
      */
     private void startPrivateChat(Friend friend) {
-        // TODO: 채팅 기능 구현 후 추가
+        // MainView 인스턴스 찾기
+        if (getScene() != null && getScene().getWindow() instanceof Stage) {
+            Stage mainStage = (Stage) getScene().getWindow();
+            if (mainStage.getUserData() instanceof MainView) {
+                MainView mainView = (MainView) mainStage.getUserData();
+                mainView.openChatWithFriend(friend);
+                return;
+            }
+        }
+
+        // MainView 참조를 찾지 못한 경우
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle("기능 준비 중");
         alert.setHeaderText(null);

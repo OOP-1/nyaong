@@ -56,8 +56,20 @@ public class DatabaseInitializer {
             statement.execute("CREATE TABLE IF NOT EXISTS ChatRooms (" +
                     "chatroom_id INT AUTO_INCREMENT PRIMARY KEY," +
                     "chatroom_name VARCHAR(100) NOT NULL," +
+                    "is_group_chat BOOLEAN NOT NULL DEFAULT FALSE," + // 이 줄이 추가됨
                     "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" +
                     ")");
+
+            // 테이블이 이미 존재하는 경우 is_group_chat 컬럼 추가 시도
+            try {
+                statement.execute("ALTER TABLE ChatRooms ADD COLUMN is_group_chat BOOLEAN NOT NULL DEFAULT FALSE");
+                System.out.println("ChatRooms 테이블에 is_group_chat 컬럼이 추가되었습니다.");
+            } catch (SQLException e) {
+                // 컬럼이 이미 존재하는 경우 예외 무시
+                if (!e.getMessage().contains("Duplicate column")) {
+                    System.err.println("is_group_chat 컬럼 추가 중 오류 발생: " + e.getMessage());
+                }
+            }
 
             // ChatRoomMembers 테이블 생성
             statement.execute("CREATE TABLE IF NOT EXISTS ChatRoomMembers (" +
@@ -77,6 +89,13 @@ public class DatabaseInitializer {
                     "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP," +
                     "FOREIGN KEY (chatroom_id) REFERENCES ChatRooms(chatroom_id) ON DELETE CASCADE," +
                     "FOREIGN KEY (member_id) REFERENCES Members(member_id) ON DELETE CASCADE" +
+                    ")");
+
+            statement.execute("CREATE TABLE IF NOT EXISTS ChatRooms (" +
+                    "chatroom_id INT AUTO_INCREMENT PRIMARY KEY," +
+                    "chatroom_name VARCHAR(100) NOT NULL," +
+                    "is_group_chat BOOLEAN NOT NULL DEFAULT FALSE," + // 그룹 채팅 여부 필드 추가
+                    "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" +
                     ")");
 
             System.out.println("데이터베이스 테이블이 성공적으로 생성되었습니다.");
