@@ -32,10 +32,14 @@ bin/
 /nbdist/
 /.nb-gradle/
 
-### VS Code ### g
+### VS Code ###
 .vscode/
 
 ### Mac OS ###
 .DS_Store
 
 .env
+
+### smart contract ###
+contracts/artifacts/
+key.json

@@ -23,6 +23,7 @@ dependencies {
     implementation 'com.h2database:h2:2.2.224'
     implementation 'mysql:mysql-connector-java:8.0.33'
     implementation 'io.github.cdimascio:dotenv-java:2.3.2'
+    implementation 'org.web3j:core:4.10.3'
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
 }
