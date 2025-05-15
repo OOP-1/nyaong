@@ -3,73 +3,77 @@ pragma solidity ^0.8.19;
 
 contract MessageVerification {
 
-    struct Message {
-        address sender;
-        string messageHash;  // 메시지의 SHA-256 해시
-        uint256 timestamp;
-        address[] signatures; // 서명한 사용자들
-        mapping(address => bool) hasSigned; // 서명 여부를 빠르게 확인하기 위한 매핑
+    struct VerifiedMessage {
+        string senderUserId;       // 발신자 userId
+        bytes32 messageHash;       // messageContent의 SHA-256 해시값 (바이트 배열로 저장)
+        uint256 timestamp;         // 블록체인 타임스탬프
+        string[] signerUserIds;    // 서명한 사용자의 userId 배열
+        mapping(string => bool) hasSigned; // userId로 서명 여부 확인
     }
 
-    // Solidity 0.8.0 이상에서는 구조체 내부에 매핑이 있으면 다음과 같이 매핑을 사용해야 합니다
-    mapping(uint256 => Message) public messages;
+    mapping(uint256 => VerifiedMessage) public messages;
     uint256 public messageCount = 0;
 
-    event MessageSent(uint256 indexed messageId, address indexed sender, string messageHash);
-    event MessageSigned(uint256 indexed messageId, address indexed signer);
+    event MessageVerified(uint256 indexed messageId, string senderUserId, bytes32 messageHash);
+    event MessageSigned(uint256 indexed messageId, string signerUserId);
 
-    function sendMessage(string memory messageHash) public returns (uint256) {
+    // messageContent의 해시값을 bytes32로 저장하고 검증 시작
+    function verifyMessage(string memory senderUserId, bytes32 messageHash) public returns (uint256) {
         uint256 currentId = messageCount;
         messageCount++;
         
-        Message storage newMessage = messages[currentId];
-        newMessage.sender = msg.sender;
+        VerifiedMessage storage newMessage = messages[currentId];
+        newMessage.senderUserId = senderUserId;
         newMessage.messageHash = messageHash;
         newMessage.timestamp = block.timestamp;
-        // 배열 초기화는 선언만으로 충분하며, 매핑은 기본값이 false로 자동 초기화됩니다
-
-        emit MessageSent(currentId, msg.sender, messageHash);
+        
+        emit MessageVerified(currentId, senderUserId, messageHash);
         return currentId;
     }
 
-    function signMessage(uint256 messageId) public {
+    // 사용자가 메시지에 서명
+    function signMessage(uint256 messageId, string memory signerUserId) public {
         require(messageId < messageCount, "Message does not exist.");
-        require(!messages[messageId].hasSigned[msg.sender], "Already signed.");
+        require(!messages[messageId].hasSigned[signerUserId], "Already signed by this user.");
         
-        messages[messageId].signatures.push(msg.sender);
-        messages[messageId].hasSigned[msg.sender] = true;
+        messages[messageId].signerUserIds.push(signerUserId);
+        messages[messageId].hasSigned[signerUserId] = true;
         
-        emit MessageSigned(messageId, msg.sender);
+        emit MessageSigned(messageId, signerUserId);
     }
 
-    function getSigners(uint256 messageId) public view returns (address[] memory) {
+    // 메시지에 서명한 사용자 목록 조회
+    function getSigners(uint256 messageId) public view returns (string[] memory) {
         require(messageId < messageCount, "Message does not exist.");
-        return messages[messageId].signatures;
+        return messages[messageId].signerUserIds;
     }
 
-    function getMessageHash(uint256 messageId) public view returns (string memory) {
+    // 메시지 해시값 조회
+    function getMessageHash(uint256 messageId) public view returns (bytes32) {
         require(messageId < messageCount, "Message does not exist.");
         return messages[messageId].messageHash;
     }
     
-    function hasUserSigned(uint256 messageId, address user) public view returns (bool) {
+    // 특정 사용자의 서명 여부 확인
+    function hasUserSigned(uint256 messageId, string memory userId) public view returns (bool) {
         require(messageId < messageCount, "Message does not exist.");
-        return messages[messageId].hasSigned[user];
+        return messages[messageId].hasSigned[userId];
     }
     
+    // 메시지 상세 정보 조회
     function getMessageDetails(uint256 messageId) public view returns (
-        address sender,
-        string memory messageHash,
+        string memory senderUserId,
+        bytes32 messageHash,
         uint256 timestamp,
         uint256 signatureCount
     ) {
         require(messageId < messageCount, "Message does not exist.");
-        Message storage messageData = messages[messageId];
+        VerifiedMessage storage messageData = messages[messageId];
         return (
-            messageData.sender,
+            messageData.senderUserId,
             messageData.messageHash,
             messageData.timestamp,
-            messageData.signatures.length
+            messageData.signerUserIds.length
         );
     }
 }

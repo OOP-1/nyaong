@@ -18,7 +18,7 @@ public class BlockchainConnector {
     private final Credentials credentials;
     private final MessageVerifier contract;
 
-    public BlockchainConnector() throws Exception{
+    public BlockchainConnector() {
         this.web3j = Web3j.build(new HttpService(RPC_URL));
         this.credentials = Credentials.create(PRIVATE_KEY);
         RawTransactionManager txManager = new RawTransactionManager(web3j, credentials, CHAIN_ID);
