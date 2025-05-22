@@ -12,6 +12,9 @@ import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
+import javafx.util.Duration;
 import org.example.model.ChatRoom;
 import org.example.model.Member;
 import org.example.model.Message;
@@ -307,12 +310,16 @@ public class ChatView extends BorderPane {
     }
 
     /**
-     * 소켓으로부터 수신된 메시지 처리
+     * 소켓으로부터 수신된 메시지 처리 - 스크롤 문제 해결
      */
     private void handleIncomingMessage(ChatMessage chatMessage) {
         Platform.runLater(() -> {
             // ChatMessage를 Message 객체로 변환
             Message message = messageRepository.convertChatMessageToMessage(chatMessage);
+
+            // 스크롤이 맨 아래에 있는지 확인 (새 메시지 자동 스크롤 여부 결정)
+            ScrollPane scrollPane = (ScrollPane) getCenter();
+            boolean wasAtBottom = scrollPane.getVvalue() >= 0.95; // 95% 이상 스크롤되어 있으면 맨 아래로 간주
 
             // 날짜가 바뀌면 날짜 구분선 추가
             String messageDate = dateFormat.format(message.getCreatedAt());
@@ -340,9 +347,18 @@ public class ChatView extends BorderPane {
             // 메시지 UI에 추가
             addMessageToUI(message);
 
-            // 스크롤을 아래로 이동
-            ScrollPane scrollPane = (ScrollPane) getCenter();
-            scrollPane.setVvalue(1.0);
+            // 새 메시지가 도착했을 때 자동 스크롤 (사용자가 맨 아래에 있었던 경우에만)
+            if (wasAtBottom) {
+                // UI 업데이트가 완료된 후 스크롤 이동을 위해 추가 지연
+                Platform.runLater(() -> {
+                    scrollPane.setVvalue(1.0);
+
+                    // 한 번 더 확실히 하기 위해 약간의 지연 후 다시 스크롤
+                    Platform.runLater(() -> {
+                        scrollPane.setVvalue(1.0);
+                    });
+                });
+            }
 
             // 마지막 메시지 시간 업데이트
             if (lastMessageTime == null || message.getCreatedAt().after(lastMessageTime)) {
@@ -552,7 +568,7 @@ public class ChatView extends BorderPane {
     }
 
     /**
-     * 메시지 전송
+     * 메시지 전송 - 스크롤 문제 해결
      */
     private void sendMessage() {
         if (currentChatRoom == null) {
@@ -573,13 +589,19 @@ public class ChatView extends BorderPane {
 
         if (messageId > 0) {
             messageField.clear();
+
+            // 메시지 전송 후 스크롤을 맨 아래로 이동
+            Platform.runLater(() -> {
+                ScrollPane scrollPane = (ScrollPane) getCenter();
+                scrollPane.setVvalue(1.0);
+            });
         } else {
             showAlert(Alert.AlertType.ERROR, "메시지 전송 실패", "메시지를 전송하지 못했습니다.");
         }
     }
 
     /**
-     * 메시지 목록 로드
+     * 메시지 목록 로드 - 스크롤 문제 해결
      */
     private void loadMessages() {
         if (currentChatRoom == null) {
@@ -610,10 +632,98 @@ public class ChatView extends BorderPane {
             }
         }
 
-        // 스크롤을 아래로 이동
+        // 초기 로드 시에는 항상 맨 아래로 스크롤
         Platform.runLater(() -> {
             ScrollPane scrollPane = (ScrollPane) getCenter();
+            // 레이아웃이 완전히 완료될 때까지 기다린 후 스크롤
+            messagesContainer.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> {
+                Platform.runLater(() -> scrollPane.setVvalue(1.0));
+            });
+
+            // 즉시 스크롤도 시도
             scrollPane.setVvalue(1.0);
+
+            // 추가 보장을 위한 지연된 스크롤
+            Platform.runLater(() -> {
+                scrollPane.setVvalue(1.0);
+            });
+        });
+    }
+
+    /**
+     * 스크롤을 맨 아래로 강제 이동하는 헬퍼 메서드
+     */
+    private void scrollToBottom() {
+        Platform.runLater(() -> {
+            ScrollPane scrollPane = (ScrollPane) getCenter();
+            if (scrollPane != null) {
+                // 여러 번 시도하여 확실히 스크롤되도록 함
+                for (int i = 0; i < 3; i++) {
+                    final int attempt = i;
+                    Platform.runLater(() -> {
+                        scrollPane.setVvalue(1.0);
+                        if (attempt == 2) { // 마지막 시도에서 추가 확인
+                            Platform.runLater(() -> scrollPane.setVvalue(1.0));
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    /**
+     * 새 메시지 알림 및 자동 스크롤을 위한 헬퍼 메서드
+     */
+    private void addMessageAndScroll(Message message) {
+        // 스크롤 위치 확인
+        ScrollPane scrollPane = (ScrollPane) getCenter();
+        boolean shouldAutoScroll = scrollPane.getVvalue() >= 0.9; // 90% 이상이면 자동 스크롤
+
+        // 메시지 추가
+        addMessageToUI(message);
+
+        // 자동 스크롤이 필요한 경우
+        if (shouldAutoScroll) {
+            scrollToBottom();
+        } else {
+            // 스크롤이 위에 있는 경우 새 메시지 알림 표시 (선택적 기능)
+            showNewMessageNotification();
+        }
+    }
+
+    /**
+     * 새 메시지 알림 표시 (사용자가 스크롤을 위로 올려두었을 때)
+     */
+    private void showNewMessageNotification() {
+        // 새 메시지 알림 버튼을 표시하여 사용자가 클릭하면 맨 아래로 이동
+        // 이 기능은 선택적으로 구현할 수 있습니다
+        Platform.runLater(() -> {
+            // 간단한 알림 구현 예시
+            if (getBottom() instanceof HBox) {
+                HBox bottomBox = (HBox) getBottom();
+
+                // 이미 알림이 있는지 확인
+                boolean hasNotification = bottomBox.getChildren().stream()
+                        .anyMatch(node -> node.getId() != null && node.getId().equals("newMessageNotification"));
+
+                if (!hasNotification) {
+                    Button newMessageBtn = new Button("새 메시지 ↓");
+                    newMessageBtn.setId("newMessageNotification");
+                    newMessageBtn.setStyle("-fx-background-color: #2196F3; -fx-text-fill: white; -fx-font-size: 12px;");
+                    newMessageBtn.setOnAction(e -> {
+                        scrollToBottom();
+                        bottomBox.getChildren().remove(newMessageBtn);
+                    });
+
+                    bottomBox.getChildren().add(0, newMessageBtn);
+
+                    // 3초 후 자동으로 제거
+                    Timeline timeline = new Timeline(new KeyFrame(Duration.seconds(3), e -> {
+                        bottomBox.getChildren().remove(newMessageBtn);
+                    }));
+                    timeline.play();
+                }
+            }
         });
     }
 
