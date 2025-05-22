@@ -1,8 +1,6 @@
 // src/main/java/org/example/view/ChatRoomsView.java
 package org.example.view;
 
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -11,12 +9,14 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
-import javafx.util.Duration;
 import org.example.model.ChatRoom;
 import org.example.model.Member;
 import org.example.repository.MemberRepository;
 import org.example.service.AuthService;
 import org.example.service.ChatService;
+import org.example.socket.ChatCommand;
+import org.example.socket.ChatCommandType;
+import org.example.socket.ChatSocketClient;
 
 import java.text.SimpleDateFormat;
 import java.util.List;
@@ -34,12 +34,14 @@ public class ChatRoomsView extends VBox {
     private final ListView<ChatRoom> chatRoomsListView;
     private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm");
     private Consumer<ChatRoom> onChatRoomSelectedCallback;
-    private Timeline autoRefreshTimeline;
+    private Consumer<ChatCommand> commandListener;
+    private final ChatSocketClient socketClient;
 
     public ChatRoomsView(Stage stage) {
         this.stage = stage;
         this.chatService = new ChatService();
         this.currentUser = AuthService.getCurrentUser();
+        this.socketClient = ChatSocketClient.getInstance();
 
         setPadding(new Insets(10));
         setSpacing(10);
@@ -63,8 +65,23 @@ public class ChatRoomsView extends VBox {
         // 채팅방 목록 로드
         loadChatRooms();
 
-        // 자동 새로고침 시작
-        startAutoRefresh();
+        // 소켓 명령 리스너 등록
+        setupSocketListener();
+    }
+
+    /**
+     * 소켓 명령 리스너 설정
+     */
+    private void setupSocketListener() {
+        commandListener = command -> {
+            if (command.getType() == ChatCommandType.REFRESH) {
+                // 채팅방 목록 새로고침 명령 처리
+                Platform.runLater(this::loadChatRooms);
+            }
+        };
+
+        // 리스너 등록
+        socketClient.addCommandListener(commandListener);
     }
 
     /**
@@ -135,31 +152,12 @@ public class ChatRoomsView extends VBox {
     }
 
     /**
-     * 자동 새로고침 시작
-     */
-    private void startAutoRefresh() {
-        // 기존 타이머가 있으면 중지
-        if (autoRefreshTimeline != null) {
-            autoRefreshTimeline.stop();
-        }
-
-        // 15초마다 자동 새로고침
-        autoRefreshTimeline = new Timeline(
-                new KeyFrame(Duration.seconds(15), event -> {
-                    loadChatRooms();
-                })
-        );
-        autoRefreshTimeline.setCycleCount(Timeline.INDEFINITE);
-        autoRefreshTimeline.play();
-    }
-
-    /**
      * 자원 해제
      */
     public void dispose() {
-        if (autoRefreshTimeline != null) {
-            autoRefreshTimeline.stop();
-            autoRefreshTimeline = null;
+        // 소켓 명령 리스너 제거
+        if (commandListener != null) {
+            socketClient.removeCommandListener(commandListener);
         }
     }
 

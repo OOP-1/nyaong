@@ -4,6 +4,9 @@ package org.example.repository;
 import org.example.boundary.DatabaseConnector;
 import org.example.model.Message;
 import org.example.model.Member;
+import org.example.socket.ChatMessage;
+import org.example.socket.ChatMessageType;
+import org.example.socket.ChatSocketClient;
 
 import java.sql.*;
 import java.util.ArrayList;
@@ -13,12 +16,18 @@ public class MessageRepository {
 
     /**
      * 메시지 전송 (저장)
+     * 소켓을 통해 메시지를 전송하고 데이터베이스에도 저장합니다.
      * @param chatRoomId 채팅방 ID
      * @param senderId 발신자 ID
      * @param content 메시지 내용
      * @return 생성된 메시지 ID
      */
     public int sendMessage(int chatRoomId, int senderId, String content) {
+        // 1. 소켓을 통해 메시지 전송
+        ChatSocketClient socketClient = ChatSocketClient.getInstance();
+        boolean sent = socketClient.sendMessage(chatRoomId, content);
+
+        // 2. 데이터베이스에 메시지 저장
         String sql = "INSERT INTO Messages (chatroom_id, member_id, message_content, created_at) " +
                 "VALUES (?, ?, ?, CURRENT_TIMESTAMP)";
 
@@ -128,7 +137,7 @@ public class MessageRepository {
     }
 
     /**
-     * 특정 시간 이후의 새 메시지 조회 (채팅 자동 업데이트용)
+     * 특정 시간 이후의 새 메시지 조회 (소켓 통신으로 대체되므로 필요 시에만 사용)
      * @param chatRoomId 채팅방 ID
      * @param lastMessageTime 마지막으로 받은 메시지 시간
      * @return 새 메시지 목록
@@ -178,5 +187,33 @@ public class MessageRepository {
         }
 
         return messages;
+    }
+
+    /**
+     * ChatMessage 객체를 Message 객체로 변환
+     */
+    public Message convertChatMessageToMessage(ChatMessage chatMessage) {
+        // Member 객체 생성 (발신자 정보)
+        Member sender = null;
+        if (chatMessage.getSenderNickname() != null) {
+            sender = new Member(
+                    chatMessage.getSenderId(),
+                    "", // 사용자 ID는 알 수 없음
+                    "", // 비밀번호는 필요 없음
+                    chatMessage.getSenderNickname(),
+                    chatMessage.getSenderStatus() != null ? chatMessage.getSenderStatus() : "UNKNOWN",
+                    "" // 역할은 필요 없음
+            );
+        }
+
+        // Message 객체 생성
+        return new Message(
+                0, // 메시지 ID는 데이터베이스에서 할당됨
+                chatMessage.getChatRoomId(),
+                chatMessage.getSenderId(),
+                chatMessage.getContent(),
+                chatMessage.getTimestamp(),
+                sender
+        );
     }
 }
