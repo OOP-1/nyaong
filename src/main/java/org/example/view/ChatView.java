@@ -1,12 +1,10 @@
 // src/main/java/org/example/view/ChatView.java
 package org.example.view;
 
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Node; // Node 임포트 추가
+import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
@@ -14,18 +12,24 @@ import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.util.Duration;
 import org.example.model.ChatRoom;
 import org.example.model.Member;
 import org.example.model.Message;
 import org.example.repository.MemberRepository;
+import org.example.repository.MessageRepository;
 import org.example.service.AuthService;
 import org.example.service.ChatService;
+import org.example.socket.ChatMessage;
+import org.example.socket.ChatSocketClient;
 
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * 채팅 화면
@@ -33,23 +37,29 @@ import java.util.Optional;
  */
 public class ChatView extends BorderPane {
     private final ChatService chatService;
+    private final MessageRepository messageRepository;
     private final Member currentUser;
     private ChatRoom currentChatRoom;
 
     private final VBox messagesContainer;
-    private TextField messageField; // final 제거
+    private TextField messageField;
     private final ListView<Member> memberListView;
     private final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm");
     private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
 
-    private Timeline messageRefreshTimeline;
+    private Consumer<ChatMessage> messageListener;  // 메시지 수신 리스너
     private Timestamp lastMessageTime;
     private final int LOAD_MESSAGE_COUNT = 20;
     private int messageOffset = 0;
 
+    // 소켓 클라이언트
+    private final ChatSocketClient socketClient;
+
     public ChatView() {
         this.chatService = new ChatService();
+        this.messageRepository = new MessageRepository();
         this.currentUser = AuthService.getCurrentUser();
+        this.socketClient = ChatSocketClient.getInstance();
 
         setPadding(new Insets(10));
 
@@ -90,6 +100,40 @@ public class ChatView extends BorderPane {
 
         rightBox.getChildren().addAll(membersLabel, memberListView);
         setRight(rightBox);
+
+        // 소켓 연결 상태 확인 및 필요시 재연결
+        ensureSocketConnection();
+    }
+
+    /**
+     * 소켓 연결 확인 및 필요시 재연결
+     * 중요: 동기 방식으로 연결을 확인하고 명확한 결과를 반환
+     */
+    private boolean ensureSocketConnection() {
+        if (!socketClient.isConnected()) {
+            System.out.println("소켓 연결이 끊어져 있어 재연결 시도합니다...");
+
+            // 최대 3번까지 재시도
+            for (int i = 0; i < 3; i++) {
+                System.out.println("연결 시도 " + (i + 1) + "...");
+                boolean connected = socketClient.connect(currentUser);
+                if (connected) {
+                    System.out.println("소켓 재연결 성공");
+                    return true;
+                }
+
+                try {
+                    // 재시도 간 잠시 대기
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            System.err.println("소켓 재연결 실패");
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -100,7 +144,7 @@ public class ChatView extends BorderPane {
         inputBox.setPadding(new Insets(10, 0, 0, 0));
         inputBox.setAlignment(Pos.CENTER);
 
-        messageField = new TextField(); // 여기서 초기화
+        messageField = new TextField();
         messageField.setPromptText("메시지를 입력하세요...");
         messageField.setOnAction(e -> sendMessage());
         HBox.setHgrow(messageField, Priority.ALWAYS);
@@ -117,8 +161,8 @@ public class ChatView extends BorderPane {
      */
     public void setChatRoom(ChatRoom chatRoom) {
         // 이전 채팅방 리소스 정리
-        if (messageRefreshTimeline != null) {
-            messageRefreshTimeline.stop();
+        if (currentChatRoom != null && messageListener != null) {
+            socketClient.removeMessageListener(currentChatRoom.getChatRoomId(), messageListener);
         }
 
         this.currentChatRoom = chatRoom;
@@ -129,65 +173,202 @@ public class ChatView extends BorderPane {
         messagesContainer.getChildren().clear();
         memberListView.getItems().clear();
 
-        if (chatRoom != null) {
-            // 채팅방 제목 설정 (1:1 채팅인 경우 상대방 이름으로 표시)
-            String displayName = chatRoom.getChatRoomName();
+        if (chatRoom == null) {
+            setTop(null);
+            return;
+        }
 
-            if (!chatRoom.isGroupChat()) {
-                // 1:1 채팅방인 경우 이름 포맷을 확인
-                String originalName = chatRoom.getChatRoomName();
-                if (originalName.startsWith("1:1_")) {
-                    // "1:1_멤버ID1_멤버ID2" 형식에서 상대방 ID 추출
-                    String[] parts = originalName.split("_");
-                    if (parts.length == 3) {
-                        int id1 = Integer.parseInt(parts[1]);
-                        int id2 = Integer.parseInt(parts[2]);
+        // 채팅방 제목 설정 및 UI 요소 구성 (기존 코드 유지)
+        setupChatRoomUI(chatRoom);
 
-                        // 상대방 ID 결정
-                        int targetId = (id1 == currentUser.getMemberId()) ? id2 : id1;
+        // 메시지 로드
+        loadMessages();
 
-                        // 상대방 정보 조회
-                        MemberRepository memberRepo = new MemberRepository();
-                        Optional<Member> targetMember = memberRepo.findById(targetId);
+        // 참여자 목록 로드
+        loadMembers();
 
-                        if (targetMember.isPresent()) {
-                            displayName = targetMember.get().getNickname() + "님과의 대화";
+        // 메시지 리스너 먼저 등록 - 비동기 처리 전에
+        messageListener = this::handleIncomingMessage;
+        socketClient.addMessageListener(chatRoom.getChatRoomId(), messageListener);
+
+        // 로딩 인디케이터 추가
+        ProgressIndicator progressIndicator = new ProgressIndicator();
+        progressIndicator.setMaxSize(30, 30);
+        HBox loadingBox = new HBox(progressIndicator);
+        loadingBox.setAlignment(Pos.CENTER);
+        loadingBox.setPadding(new Insets(10));
+        Label loadingLabel = new Label("채팅방 연결 중...");
+        loadingBox.getChildren().add(loadingLabel);
+        messagesContainer.getChildren().add(loadingBox);
+
+        // 소켓 연결 및 채팅방 입장 처리를 새 스레드에서 실행
+        new Thread(() -> {
+            try {
+                // 소켓 연결 상태 확인 - 여기서 시간이 오래 걸릴 수 있음
+                boolean connected = ensureSocketConnection();
+
+                if (!connected) {
+                    Platform.runLater(() -> {
+                        // 로딩 표시 제거
+                        messagesContainer.getChildren().removeIf(node ->
+                                node instanceof HBox && ((HBox) node).getChildren().get(0) instanceof ProgressIndicator);
+
+                        showAlert(Alert.AlertType.ERROR, "연결 오류",
+                                "채팅 서버에 연결할 수 없습니다. 네트워크 연결을 확인하고 다시 시도해 주세요.");
+                    });
+                    return;
+                }
+
+                // 채팅방 참여 명령 전송
+                boolean joined = socketClient.joinChatRoom(chatRoom.getChatRoomId());
+
+                if (!joined) {
+                    Platform.runLater(() -> {
+                        // 로딩 표시 제거
+                        messagesContainer.getChildren().removeIf(node ->
+                                node instanceof HBox && ((HBox) node).getChildren().get(0) instanceof ProgressIndicator);
+
+                        showAlert(Alert.AlertType.ERROR, "채팅방 입장 오류",
+                                "채팅방 입장 처리 중 오류가 발생했습니다. 다시 시도해 주세요.");
+                    });
+                    return;
+                }
+
+                // 채팅방 멤버 목록 업데이트
+                List<Member> members = chatService.getChatRoomMembers(chatRoom.getChatRoomId());
+                List<Integer> memberIds = members.stream()
+                        .map(Member::getMemberId)
+                        .collect(java.util.stream.Collectors.toList());
+                socketClient.updateChatRoomMembers(chatRoom.getChatRoomId(), memberIds);
+
+                // 모든 처리가 완료되면 로딩 표시 제거
+                Platform.runLater(() -> {
+                    messagesContainer.getChildren().removeIf(node ->
+                            node instanceof HBox && ((HBox) node).getChildren().get(0) instanceof ProgressIndicator);
+                });
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                Platform.runLater(() -> {
+                    // 로딩 표시 제거
+                    messagesContainer.getChildren().removeIf(node ->
+                            node instanceof HBox && ((HBox) node).getChildren().get(0) instanceof ProgressIndicator);
+
+                    showAlert(Alert.AlertType.ERROR, "오류 발생",
+                            "채팅방 입장 중 오류가 발생했습니다: " + e.getMessage());
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * 채팅방 UI 설정 (기존 코드에서 추출)
+     */
+    private void setupChatRoomUI(ChatRoom chatRoom) {
+        // 채팅방 제목 설정 (1:1 채팅인 경우 상대방 이름으로 표시)
+        String displayName = chatRoom.getChatRoomName();
+
+        if (!chatRoom.isGroupChat()) {
+            // 1:1 채팅방인 경우 이름 포맷을 확인
+            String originalName = chatRoom.getChatRoomName();
+            if (originalName.startsWith("1:1_")) {
+                // "1:1_멤버ID1_멤버ID2" 형식에서 상대방 ID 추출
+                String[] parts = originalName.split("_");
+                if (parts.length == 3) {
+                    int id1 = Integer.parseInt(parts[1]);
+                    int id2 = Integer.parseInt(parts[2]);
+
+                    // 상대방 ID 결정
+                    int targetId = (id1 == currentUser.getMemberId()) ? id2 : id1;
+
+                    // 상대방 정보 조회
+                    MemberRepository memberRepo = new MemberRepository();
+                    Optional<Member> targetMember = memberRepo.findById(targetId);
+
+                    if (targetMember.isPresent()) {
+                        displayName = targetMember.get().getNickname() + "님과의 대화";
+                    }
+                }
+            }
+        }
+
+        // 채팅방 상단 영역 구성 (제목 + 나가기 버튼)
+        HBox topBox = new HBox(10);
+        topBox.setAlignment(Pos.CENTER_LEFT);
+        topBox.setPadding(new Insets(5));
+
+        Label titleLabel = new Label(displayName);
+        titleLabel.setFont(Font.font("System", FontWeight.BOLD, 16));
+        HBox.setHgrow(titleLabel, Priority.ALWAYS);
+
+        // 나가기 버튼
+        Button leaveButton = new Button("채팅방 나가기");
+        leaveButton.setOnAction(e -> leaveChatRoom());
+
+        topBox.getChildren().addAll(titleLabel, leaveButton);
+        setTop(topBox);
+    }
+
+    /**
+     * 소켓으로부터 수신된 메시지 처리 - 스크롤 문제 해결
+     */
+    private void handleIncomingMessage(ChatMessage chatMessage) {
+        Platform.runLater(() -> {
+            // ChatMessage를 Message 객체로 변환
+            Message message = messageRepository.convertChatMessageToMessage(chatMessage);
+
+            // 스크롤이 맨 아래에 있는지 확인 (새 메시지 자동 스크롤 여부 결정)
+            ScrollPane scrollPane = (ScrollPane) getCenter();
+            boolean wasAtBottom = scrollPane.getVvalue() >= 0.95; // 95% 이상 스크롤되어 있으면 맨 아래로 간주
+
+            // 날짜가 바뀌면 날짜 구분선 추가
+            String messageDate = dateFormat.format(message.getCreatedAt());
+
+            // 마지막 메시지가 다른 날짜인지 확인
+            boolean needDateSeparator = true;
+            if (!messagesContainer.getChildren().isEmpty()) {
+                // 마지막 노드가 날짜 구분선인지 확인
+                Node lastNode = messagesContainer.getChildren().get(messagesContainer.getChildren().size() - 1);
+                if (lastNode instanceof HBox) {
+                    HBox hbox = (HBox) lastNode;
+                    if (!hbox.getChildren().isEmpty() && hbox.getChildren().get(0) instanceof Label) {
+                        Label label = (Label) hbox.getChildren().get(0);
+                        if (label.getText().equals(messageDate)) {
+                            needDateSeparator = false;
                         }
                     }
                 }
             }
 
-            // 채팅방 상단 영역 구성 (제목 + 나가기 버튼)
-            HBox topBox = new HBox(10);
-            topBox.setAlignment(Pos.CENTER_LEFT);
-            topBox.setPadding(new Insets(5));
+            if (needDateSeparator) {
+                addDateSeparator(messageDate);
+            }
 
-            Label titleLabel = new Label(displayName);
-            titleLabel.setFont(Font.font("System", FontWeight.BOLD, 16));
-            HBox.setHgrow(titleLabel, Priority.ALWAYS);
+            // 메시지 UI에 추가
+            addMessageToUI(message);
 
-            // 나가기 버튼
-            Button leaveButton = new Button("채팅방 나가기");
-            leaveButton.setOnAction(e -> leaveChatRoom());
+            // 새 메시지가 도착했을 때 자동 스크롤 (사용자가 맨 아래에 있었던 경우에만)
+            if (wasAtBottom) {
+                // UI 업데이트가 완료된 후 스크롤 이동을 위해 추가 지연
+                Platform.runLater(() -> {
+                    scrollPane.setVvalue(1.0);
 
-            topBox.getChildren().addAll(titleLabel, leaveButton);
-            setTop(topBox);
+                    // 한 번 더 확실히 하기 위해 약간의 지연 후 다시 스크롤
+                    Platform.runLater(() -> {
+                        scrollPane.setVvalue(1.0);
+                    });
+                });
+            }
 
-            // 메시지 로드
-            loadMessages(false);
-
-            // 참여자 목록 로드
-            loadMembers();
-
-            // 자동 새로고침 시작
-            startMessageRefresher();
-        } else {
-            setTop(null);
-        }
+            // 마지막 메시지 시간 업데이트
+            if (lastMessageTime == null || message.getCreatedAt().after(lastMessageTime)) {
+                lastMessageTime = message.getCreatedAt();
+            }
+        });
     }
 
     /**
-     * 채팅방 나가기
+     * 채팅방 나가기 - 오류 수정된 버전
      */
     private void leaveChatRoom() {
         if (currentChatRoom == null) {
@@ -202,70 +383,192 @@ public class ChatView extends BorderPane {
 
         Optional<ButtonType> result = confirmAlert.showAndWait();
         if (result.isPresent() && result.get() == ButtonType.OK) {
-            // 채팅방 나가기 실행
-            ChatService chatService = new ChatService();
-            ChatService.ChatResult leaveResult = chatService.leaveChatRoom(
-                    currentChatRoom.getChatRoomId(), currentUser.getMemberId());
 
-            if (leaveResult.isSuccess()) {
-                // 성공 메시지 표시
-                showAlert(Alert.AlertType.INFORMATION, "채팅방 나가기", leaveResult.getMessage());
+            // 현재 채팅방 정보를 final 변수로 저장 (람다에서 사용하기 위해)
+            final ChatRoom chatRoomToLeave = currentChatRoom;
+            final int currentUserId = currentUser.getMemberId();
 
-                // 자원 해제
-                dispose();
+            // 로딩 인디케이터 표시
+            showLoadingOverlay("채팅방에서 나가는 중...");
 
-                // 부모 BorderPane 찾기
-                if (getParent() instanceof BorderPane) {
-                    BorderPane parent = (BorderPane) getParent();
+            // 기존 UI 비활성화
+            setDisable(true);
 
-                    // 뒤로가기 버튼이 있는 HBox 제거
-                    parent.setTop(null);
-
-                    try {
-                        // 채팅방 목록으로 돌아가기
-                        ChatRoomsView chatRoomsView = new ChatRoomsView(
-                                (Stage) getScene().getWindow());
-
-                        // ChatRoomsView의 선택 핸들러 재설정
-                        chatRoomsView.setOnChatRoomSelectedCallback(chatRoom -> {
-                            // 새로운 ChatView 인스턴스 생성
-                            ChatView newChatView = new ChatView();
-                            newChatView.setChatRoom(chatRoom);
-
-                            // 뒤로가기 버튼 추가
-                            Button backButton = new Button("← 채팅방 목록");
-                            backButton.setOnAction(ev -> {
-                                newChatView.setChatRoom(null);
-                                newChatView.dispose();
-                                chatRoomsView.loadChatRooms();
-                                parent.setCenter(chatRoomsView);
-                                parent.setTop(null);
-                            });
-
-                            HBox topBox = new HBox(backButton);
-                            topBox.setPadding(new Insets(5));
-
-                            parent.setCenter(newChatView);
-                            parent.setTop(topBox);
+            // 백그라운드 스레드에서 처리
+            new Thread(() -> {
+                try {
+                    // 1. 소켓 연결 확인
+                    if (!ensureSocketConnection()) {
+                        Platform.runLater(() -> {
+                            setDisable(false);
+                            removeLoadingOverlay();
+                            showAlert(Alert.AlertType.ERROR, "연결 오류",
+                                    "서버 연결이 끊어져 있습니다. 다시 시도해 주세요.");
                         });
-
-                        chatRoomsView.loadChatRooms();
-                        parent.setCenter(chatRoomsView);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        showAlert(Alert.AlertType.ERROR, "오류 발생",
-                                "채팅방 나가기 후 화면 전환 중 오류가 발생했습니다: " + e.getMessage());
+                        return;
                     }
+
+                    // 2. 소켓으로 퇴장 명령 전송
+                    boolean socketResult = socketClient.leaveChatRoom(chatRoomToLeave.getChatRoomId());
+                    if (!socketResult) {
+                        System.err.println("소켓 퇴장 명령 전송 실패, 계속 진행...");
+                    }
+
+                    // 3. 데이터베이스에서 채팅방 나가기 처리
+                    ChatService chatService = new ChatService();
+                    ChatService.ChatResult leaveResult = chatService.leaveChatRoom(
+                            chatRoomToLeave.getChatRoomId(), currentUserId);
+
+                    // 4. UI 스레드에서 결과 처리
+                    Platform.runLater(() -> {
+                        setDisable(false);
+                        removeLoadingOverlay();
+
+                        if (leaveResult.isSuccess()) {
+                            // 성공 메시지 표시
+                            showAlert(Alert.AlertType.INFORMATION, "채팅방 나가기", leaveResult.getMessage());
+
+                            // 자원 해제
+                            dispose();
+
+                            // 채팅방 목록으로 돌아가기
+                            navigateBackToChatRoomsList();
+                        } else {
+                            // 실패 메시지 표시
+                            showAlert(Alert.AlertType.ERROR, "채팅방 나가기 실패", leaveResult.getMessage());
+                        }
+                    });
+
+                } catch (Exception e) {
+                    System.err.println("채팅방 나가기 중 오류 발생: " + e.getMessage());
+                    Platform.runLater(() -> {
+                        setDisable(false);
+                        removeLoadingOverlay();
+                        showAlert(Alert.AlertType.ERROR, "오류 발생",
+                                "채팅방 나가기 중 오류가 발생했습니다: " + e.getMessage());
+                    });
                 }
-            } else {
-                // 실패 메시지 표시
-                showAlert(Alert.AlertType.ERROR, "채팅방 나가기 실패", leaveResult.getMessage());
+            }).start();
+        }
+    }
+
+    /**
+     * 로딩 오버레이 표시
+     */
+    private void showLoadingOverlay(String message) {
+        ProgressIndicator progressIndicator = new ProgressIndicator();
+        progressIndicator.setMaxSize(30, 30);
+
+        Label loadingLabel = new Label(message);
+        loadingLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+
+        VBox loadingBox = new VBox(10);
+        loadingBox.setAlignment(Pos.CENTER);
+        loadingBox.setPadding(new Insets(20));
+        loadingBox.getChildren().addAll(progressIndicator, loadingLabel);
+
+        StackPane overlay = new StackPane();
+        overlay.setStyle("-fx-background-color: rgba(0,0,0,0.5);");
+        overlay.getChildren().add(loadingBox);
+        overlay.setId("loadingOverlay"); // ID 설정으로 나중에 찾기 쉽게
+
+        // 부모에 오버레이 추가
+        if (getParent() instanceof BorderPane) {
+            BorderPane parent = (BorderPane) getParent();
+            StackPane container = new StackPane();
+            container.getChildren().addAll(this, overlay);
+            parent.setCenter(container);
+        }
+    }
+
+    /**
+     * 로딩 오버레이 제거
+     */
+    private void removeLoadingOverlay() {
+        if (getParent() instanceof StackPane) {
+            StackPane container = (StackPane) getParent();
+            // 오버레이 제거
+            container.getChildren().removeIf(node ->
+                    node instanceof StackPane && "loadingOverlay".equals(node.getId()));
+
+            // 원래 구조로 복원
+            if (container.getParent() instanceof BorderPane) {
+                BorderPane parent = (BorderPane) container.getParent();
+                parent.setCenter(this);
             }
         }
     }
 
     /**
-     * 메시지 전송
+     * 채팅방 목록으로 돌아가기
+     */
+    private void navigateBackToChatRoomsList() {
+        try {
+            // 부모 BorderPane 찾기
+            BorderPane parent = findParentBorderPane();
+
+            if (parent != null) {
+                // 뒤로가기 버튼이 있는 HBox 제거
+                parent.setTop(null);
+
+                // 채팅방 목록으로 돌아가기
+                ChatRoomsView chatRoomsView = new ChatRoomsView((Stage) getScene().getWindow());
+
+                // ChatRoomsView의 선택 핸들러 재설정
+                chatRoomsView.setOnChatRoomSelectedCallback(chatRoom -> {
+                    createNewChatView(chatRoom, parent, chatRoomsView);
+                });
+
+                chatRoomsView.loadChatRooms();
+                parent.setCenter(chatRoomsView);
+            }
+        } catch (Exception e) {
+            System.err.println("화면 전환 중 오류 발생: " + e.getMessage());
+            showAlert(Alert.AlertType.ERROR, "오류 발생",
+                    "채팅방 나가기 후 화면 전환 중 오류가 발생했습니다.");
+        }
+    }
+
+    /**
+     * 부모 BorderPane 찾기
+     */
+    private BorderPane findParentBorderPane() {
+        if (getParent() instanceof BorderPane) {
+            return (BorderPane) getParent();
+        } else if (getParent() instanceof StackPane &&
+                getParent().getParent() instanceof BorderPane) {
+            return (BorderPane) getParent().getParent();
+        }
+        return null;
+    }
+
+    /**
+     * 새로운 ChatView 생성 및 설정
+     */
+    private void createNewChatView(ChatRoom chatRoom, BorderPane parent, ChatRoomsView chatRoomsView) {
+        // 새로운 ChatView 인스턴스 생성
+        ChatView newChatView = new ChatView();
+        newChatView.setChatRoom(chatRoom);
+
+        // 뒤로가기 버튼 추가
+        Button backButton = new Button("← 채팅방 목록");
+        backButton.setOnAction(ev -> {
+            newChatView.setChatRoom(null);
+            newChatView.dispose();
+            chatRoomsView.loadChatRooms();
+            parent.setCenter(chatRoomsView);
+            parent.setTop(null);
+        });
+
+        HBox topBox = new HBox(backButton);
+        topBox.setPadding(new Insets(5));
+
+        parent.setCenter(newChatView);
+        parent.setTop(topBox);
+    }
+
+    /**
+     * 메시지 전송 - 스크롤 문제 해결
      */
     private void sendMessage() {
         if (currentChatRoom == null) {
@@ -277,76 +580,151 @@ public class ChatView extends BorderPane {
             return;
         }
 
-        ChatService.ChatResult result = chatService.sendMessage(
+        // 소켓 연결 확인
+        ensureSocketConnection();
+
+        // 메시지 전송 (데이터베이스 저장 + 소켓 전송)
+        int messageId = messageRepository.sendMessage(
                 currentChatRoom.getChatRoomId(), currentUser.getMemberId(), messageText);
 
-        if (result.isSuccess()) {
+        if (messageId > 0) {
             messageField.clear();
-            loadMessages(true); // 최신 메시지만 로드
-        } else {
-            showAlert(Alert.AlertType.ERROR, "메시지 전송 실패", result.getMessage());
-        }
-    }
 
-    /**
-     * 메시지 목록 로드
-     * @param onlyNewMessages true면 새 메시지만, false면 전체 로드
-     */
-    private void loadMessages(boolean onlyNewMessages) {
-        if (currentChatRoom == null) {
-            return;
-        }
-
-        if (onlyNewMessages && lastMessageTime != null) {
-            // 새 메시지만 로드
-            List<Message> newMessages = chatService.getNewMessages(
-                    currentChatRoom.getChatRoomId(), lastMessageTime);
-
-            for (Message message : newMessages) {
-                addMessageToUI(message);
-                if (message.getCreatedAt().after(lastMessageTime)) {
-                    lastMessageTime = message.getCreatedAt();
-                }
-            }
-
-            // 새 메시지가 있으면 스크롤을 아래로 이동
-            if (!newMessages.isEmpty()) {
-                Platform.runLater(() -> {
-                    ScrollPane scrollPane = (ScrollPane) getCenter();
-                    scrollPane.setVvalue(1.0);
-                });
-            }
-        } else {
-            // 초기 로드 - 최근 메시지부터 일정 개수만큼
-            List<Message> messages = chatService.getMessagesByChatRoomId(
-                    currentChatRoom.getChatRoomId(), LOAD_MESSAGE_COUNT, messageOffset);
-
-            // UI에 메시지 추가
-            messagesContainer.getChildren().clear();
-
-            String currentDateStr = null;
-            for (Message message : messages) {
-                // 날짜가 바뀌면 날짜 구분선 추가
-                String messageDate = dateFormat.format(message.getCreatedAt());
-                if (!messageDate.equals(currentDateStr)) {
-                    currentDateStr = messageDate;
-                    addDateSeparator(currentDateStr);
-                }
-
-                addMessageToUI(message);
-
-                // 가장 최근 메시지 시간 기록
-                if (lastMessageTime == null || message.getCreatedAt().after(lastMessageTime)) {
-                    lastMessageTime = message.getCreatedAt();
-                }
-            }
-
-            // 스크롤을 아래로 이동
+            // 메시지 전송 후 스크롤을 맨 아래로 이동
             Platform.runLater(() -> {
                 ScrollPane scrollPane = (ScrollPane) getCenter();
                 scrollPane.setVvalue(1.0);
             });
+        } else {
+            showAlert(Alert.AlertType.ERROR, "메시지 전송 실패", "메시지를 전송하지 못했습니다.");
         }
+    }
+
+    /**
+     * 메시지 목록 로드 - 스크롤 문제 해결
+     */
+    private void loadMessages() {
+        if (currentChatRoom == null) {
+            return;
+        }
+
+        // 초기 로드 - 최근 메시지부터 일정 개수만큼
+        List<Message> messages = messageRepository.getMessagesByChatRoomId(
+                currentChatRoom.getChatRoomId(), LOAD_MESSAGE_COUNT, messageOffset);
+
+        // UI에 메시지 추가
+        messagesContainer.getChildren().clear();
+
+        String currentDateStr = null;
+        for (Message message : messages) {
+            // 날짜가 바뀌면 날짜 구분선 추가
+            String messageDate = dateFormat.format(message.getCreatedAt());
+            if (!messageDate.equals(currentDateStr)) {
+                currentDateStr = messageDate;
+                addDateSeparator(currentDateStr);
+            }
+
+            addMessageToUI(message);
+
+            // 가장 최근 메시지 시간 기록
+            if (lastMessageTime == null || message.getCreatedAt().after(lastMessageTime)) {
+                lastMessageTime = message.getCreatedAt();
+            }
+        }
+
+        // 초기 로드 시에는 항상 맨 아래로 스크롤
+        Platform.runLater(() -> {
+            ScrollPane scrollPane = (ScrollPane) getCenter();
+            // 레이아웃이 완전히 완료될 때까지 기다린 후 스크롤
+            messagesContainer.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> {
+                Platform.runLater(() -> scrollPane.setVvalue(1.0));
+            });
+
+            // 즉시 스크롤도 시도
+            scrollPane.setVvalue(1.0);
+
+            // 추가 보장을 위한 지연된 스크롤
+            Platform.runLater(() -> {
+                scrollPane.setVvalue(1.0);
+            });
+        });
+    }
+
+    /**
+     * 스크롤을 맨 아래로 강제 이동하는 헬퍼 메서드
+     */
+    private void scrollToBottom() {
+        Platform.runLater(() -> {
+            ScrollPane scrollPane = (ScrollPane) getCenter();
+            if (scrollPane != null) {
+                // 여러 번 시도하여 확실히 스크롤되도록 함
+                for (int i = 0; i < 3; i++) {
+                    final int attempt = i;
+                    Platform.runLater(() -> {
+                        scrollPane.setVvalue(1.0);
+                        if (attempt == 2) { // 마지막 시도에서 추가 확인
+                            Platform.runLater(() -> scrollPane.setVvalue(1.0));
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    /**
+     * 새 메시지 알림 및 자동 스크롤을 위한 헬퍼 메서드
+     */
+    private void addMessageAndScroll(Message message) {
+        // 스크롤 위치 확인
+        ScrollPane scrollPane = (ScrollPane) getCenter();
+        boolean shouldAutoScroll = scrollPane.getVvalue() >= 0.9; // 90% 이상이면 자동 스크롤
+
+        // 메시지 추가
+        addMessageToUI(message);
+
+        // 자동 스크롤이 필요한 경우
+        if (shouldAutoScroll) {
+            scrollToBottom();
+        } else {
+            // 스크롤이 위에 있는 경우 새 메시지 알림 표시 (선택적 기능)
+            showNewMessageNotification();
+        }
+    }
+
+    /**
+     * 새 메시지 알림 표시 (사용자가 스크롤을 위로 올려두었을 때)
+     */
+    private void showNewMessageNotification() {
+        // 새 메시지 알림 버튼을 표시하여 사용자가 클릭하면 맨 아래로 이동
+        // 이 기능은 선택적으로 구현할 수 있습니다
+        Platform.runLater(() -> {
+            // 간단한 알림 구현 예시
+            if (getBottom() instanceof HBox) {
+                HBox bottomBox = (HBox) getBottom();
+
+                // 이미 알림이 있는지 확인
+                boolean hasNotification = bottomBox.getChildren().stream()
+                        .anyMatch(node -> node.getId() != null && node.getId().equals("newMessageNotification"));
+
+                if (!hasNotification) {
+                    Button newMessageBtn = new Button("새 메시지 ↓");
+                    newMessageBtn.setId("newMessageNotification");
+                    newMessageBtn.setStyle("-fx-background-color: #2196F3; -fx-text-fill: white; -fx-font-size: 12px;");
+                    newMessageBtn.setOnAction(e -> {
+                        scrollToBottom();
+                        bottomBox.getChildren().remove(newMessageBtn);
+                    });
+
+                    bottomBox.getChildren().add(0, newMessageBtn);
+
+                    // 3초 후 자동으로 제거
+                    Timeline timeline = new Timeline(new KeyFrame(Duration.seconds(3), e -> {
+                        bottomBox.getChildren().remove(newMessageBtn);
+                    }));
+                    timeline.play();
+                }
+            }
+        });
     }
 
     /**
@@ -359,7 +737,7 @@ public class ChatView extends BorderPane {
 
         messageOffset += LOAD_MESSAGE_COUNT;
 
-        List<Message> olderMessages = chatService.getMessagesByChatRoomId(
+        List<Message> olderMessages = messageRepository.getMessagesByChatRoomId(
                 currentChatRoom.getChatRoomId(), LOAD_MESSAGE_COUNT, messageOffset);
 
         if (!olderMessages.isEmpty()) {
@@ -401,6 +779,83 @@ public class ChatView extends BorderPane {
                 }
             });
         }
+    }
+
+    /**
+     * 채팅방 설정 (소켓 처리 없이 - 이미 처리됨)
+     */
+    public void setChatRoomWithoutSocket(ChatRoom chatRoom, boolean socketConnected) {
+        // 이전 채팅방 리소스 정리
+        if (currentChatRoom != null && messageListener != null) {
+            socketClient.removeMessageListener(currentChatRoom.getChatRoomId(), messageListener);
+        }
+
+        this.currentChatRoom = chatRoom;
+        messageOffset = 0;
+        lastMessageTime = null;
+
+        // UI 초기화
+        messagesContainer.getChildren().clear();
+        memberListView.getItems().clear();
+
+        if (chatRoom == null) {
+            setTop(null);
+            return;
+        }
+
+        // 채팅방 제목 설정 및 UI 구성
+        setupChatRoomUI(chatRoom);
+
+        // 소켓 연결 여부 검사
+        if (!socketConnected) {
+            VBox errorBox = new VBox(10);
+            errorBox.setAlignment(Pos.CENTER);
+
+            Label errorLabel = new Label("채팅 서버 연결 오류");
+            errorLabel.setStyle("-fx-text-fill: red; -fx-font-weight: bold; -fx-font-size: 14px;");
+
+            Label detailLabel = new Label("메시지를 보내거나 받을 수 없습니다.\n다시 연결하려면 채팅방을 다시 선택해주세요.");
+            detailLabel.setStyle("-fx-text-fill: #555;");
+
+            Button reconnectButton = new Button("재연결 시도");
+            reconnectButton.setOnAction(e -> {
+                // 현재 채팅방 정보 저장
+                ChatRoom current = this.currentChatRoom;
+
+                // UI 초기화
+                dispose();
+
+                // 재연결 시도
+                boolean connected = socketClient.connect(AuthService.getCurrentUser());
+
+                if (connected) {
+                    // 성공 시 채팅방 다시 설정
+                    setChatRoom(current);
+                } else {
+                    // 실패 시 오류 메시지
+                    VBox reconnectErrorBox = new VBox(10);
+                    reconnectErrorBox.setAlignment(Pos.CENTER);
+                    reconnectErrorBox.getChildren().add(new Label("재연결 실패. 나중에 다시 시도해주세요."));
+                    messagesContainer.getChildren().add(reconnectErrorBox);
+                }
+            });
+
+            errorBox.getChildren().addAll(errorLabel, detailLabel, reconnectButton);
+            messagesContainer.getChildren().add(errorBox);
+            return;
+        }
+
+        // 메시지 리스너 등록
+        messageListener = this::handleIncomingMessage;
+        socketClient.addMessageListener(chatRoom.getChatRoomId(), messageListener);
+
+        // 메시지 로드
+        loadMessages();
+
+        // 참여자 목록 로드
+        loadMembers();
+
+        System.out.println("ChatView 설정 완료");
     }
 
     /**
@@ -487,7 +942,8 @@ public class ChatView extends BorderPane {
             VBox contentBox = new VBox(5);
 
             // 발신자 이름
-            Label nameLabel = new Label(message.getSender().getNickname());
+            Label nameLabel = new Label(message.getSender() != null ?
+                    message.getSender().getNickname() : "알 수 없음");
             nameLabel.setStyle("-fx-font-weight: bold;");
 
             HBox messageTimeBox = new HBox(10);
@@ -526,33 +982,12 @@ public class ChatView extends BorderPane {
     }
 
     /**
-     * 메시지 자동 새로고침 시작
-     */
-    private void startMessageRefresher() {
-        if (messageRefreshTimeline != null) {
-            messageRefreshTimeline.stop();
-        }
-
-        // 3초마다 새 메시지 확인
-        messageRefreshTimeline = new Timeline(
-                new KeyFrame(Duration.seconds(3), event -> {
-                    if (currentChatRoom != null) {
-                        loadMessages(true); // 새 메시지만 로드
-                    }
-                })
-        );
-
-        messageRefreshTimeline.setCycleCount(Timeline.INDEFINITE);
-        messageRefreshTimeline.play();
-    }
-
-    /**
      * 자원 해제
      */
     public void dispose() {
-        if (messageRefreshTimeline != null) {
-            messageRefreshTimeline.stop();
-            messageRefreshTimeline = null;
+        // 소켓 메시지 리스너 제거
+        if (currentChatRoom != null && messageListener != null) {
+            socketClient.removeMessageListener(currentChatRoom.getChatRoomId(), messageListener);
         }
     }
 

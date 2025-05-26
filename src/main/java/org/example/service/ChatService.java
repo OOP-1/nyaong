@@ -7,12 +7,16 @@ import org.example.model.Message;
 import org.example.repository.ChatRoomRepository;
 import org.example.repository.MessageRepository;
 import org.example.repository.MemberRepository;
+import org.example.socket.ChatCommandType;
+import org.example.socket.ChatCommand;
+import org.example.socket.ChatSocketClient;
 
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * 채팅 관련 비즈니스 로직을 처리하는 서비스 클래스
@@ -21,11 +25,13 @@ public class ChatService {
     private final ChatRoomRepository chatRoomRepository;
     private final MessageRepository messageRepository;
     private final MemberRepository memberRepository;
+    private final ChatSocketClient socketClient;
 
     public ChatService() {
         this.chatRoomRepository = new ChatRoomRepository();
         this.messageRepository = new MessageRepository();
         this.memberRepository = new MemberRepository();
+        this.socketClient = ChatSocketClient.getInstance();
     }
 
     /**
@@ -42,6 +48,12 @@ public class ChatService {
         int chatRoomId = chatRoomRepository.getOrCreatePrivateChatRoom(currentMemberId, targetMemberId);
 
         if (chatRoomId > 0) {
+            // 채팅방 생성 후 소켓 서버에 멤버 목록 업데이트
+            List<Integer> members = new ArrayList<>();
+            members.add(currentMemberId);
+            members.add(targetMemberId);
+            socketClient.updateChatRoomMembers(chatRoomId, members);
+
             Optional<Member> targetMember = memberRepository.findById(targetMemberId);
             String targetName = targetMember.isPresent() ? targetMember.get().getNickname() : "상대방";
             return new ChatResult(true, targetName + "님과의 대화방이 생성되었습니다.", chatRoomId);
@@ -71,6 +83,9 @@ public class ChatService {
         int chatRoomId = chatRoomRepository.createChatRoom(chatRoomName, true, memberIds);
 
         if (chatRoomId > 0) {
+            // 채팅방 생성 후 소켓 서버에 멤버 목록 업데이트
+            socketClient.updateChatRoomMembers(chatRoomId, memberIds);
+
             return new ChatResult(true, "그룹 채팅방이 생성되었습니다.", chatRoomId);
         } else {
             return new ChatResult(false, "채팅방 생성에 실패했습니다.", -1);
@@ -135,6 +150,16 @@ public class ChatService {
         boolean success = chatRoomRepository.addChatRoomMember(chatRoomId, memberId);
 
         if (success) {
+            // 멤버 추가 후 소켓 서버에 멤버 목록 업데이트
+            List<Member> members = getChatRoomMembers(chatRoomId);
+            List<Integer> memberIds = members.stream()
+                    .map(Member::getMemberId)
+                    .collect(Collectors.toList());
+            socketClient.updateChatRoomMembers(chatRoomId, memberIds);
+
+            // 소켓 서버에 채팅방 입장 알림
+            socketClient.joinChatRoom(chatRoomId);
+
             return new ChatResult(true, member.get().getNickname() + "님이 채팅방에 추가되었습니다.", chatRoomId);
         } else {
             return new ChatResult(false, "참여자 추가에 실패했습니다.", chatRoomId);
@@ -156,6 +181,16 @@ public class ChatService {
         boolean success = chatRoomRepository.removeChatRoomMember(chatRoomId, memberId);
 
         if (success) {
+            // 소켓 서버에 채팅방 퇴장 알림
+            socketClient.leaveChatRoom(chatRoomId);
+
+            // 멤버 제거 후 소켓 서버에 멤버 목록 업데이트
+            List<Member> members = getChatRoomMembers(chatRoomId);
+            List<Integer> memberIds = members.stream()
+                    .map(Member::getMemberId)
+                    .collect(Collectors.toList());
+            socketClient.updateChatRoomMembers(chatRoomId, memberIds);
+
             return new ChatResult(true, member.get().getNickname() + "님이 채팅방에서 제거되었습니다.", chatRoomId);
         } else {
             return new ChatResult(false, "참여자 제거에 실패했습니다.", chatRoomId);
@@ -163,19 +198,43 @@ public class ChatService {
     }
 
     /**
-     * 채팅방 나가기
+     * 채팅방 나가기 (소켓 처리 없이) - ChatView에서 이미 소켓 처리했으므로
+     * @param chatRoomId 채팅방 ID
+     * @param memberId 나가는 참여자 ID
+     * @return 나가기 결과
+     */
+    public ChatResult leaveChatRoomWithoutSocket(int chatRoomId, int memberId) {
+        boolean success = chatRoomRepository.leaveChatRoom(chatRoomId, memberId);
+
+        if (success) {
+            // 채팅방이 아직 존재하는지 확인
+            Optional<ChatRoom> chatRoom = getChatRoomById(chatRoomId);
+            if (chatRoom.isPresent()) {
+                // 멤버 제거 후 소켓 서버에 멤버 목록 업데이트
+                List<Member> members = getChatRoomMembers(chatRoomId);
+                List<Integer> memberIds = members.stream()
+                        .map(Member::getMemberId)
+                        .collect(Collectors.toList());
+                socketClient.updateChatRoomMembers(chatRoomId, memberIds);
+            }
+
+            return new ChatResult(true, "채팅방에서 나갔습니다.", -1);
+        } else {
+            return new ChatResult(false, "채팅방 나가기에 실패했습니다.", chatRoomId);
+        }
+    }
+
+    /**
+     * 채팅방 나가기 (기존 메서드 - 호환성 유지)
      * @param chatRoomId 채팅방 ID
      * @param memberId 나가는 참여자 ID
      * @return 나가기 결과
      */
     public ChatResult leaveChatRoom(int chatRoomId, int memberId) {
-        boolean success = chatRoomRepository.leaveChatRoom(chatRoomId, memberId);
+        // 소켓 서버에 채팅방 퇴장 알림
+        socketClient.leaveChatRoom(chatRoomId);
 
-        if (success) {
-            return new ChatResult(true, "채팅방에서 나갔습니다.", -1);
-        } else {
-            return new ChatResult(false, "채팅방 나가기에 실패했습니다.", chatRoomId);
-        }
+        return leaveChatRoomWithoutSocket(chatRoomId, memberId);
     }
 
     /**
@@ -214,7 +273,7 @@ public class ChatService {
     }
 
     /**
-     * 새 메시지 조회
+     * 새 메시지 조회 (폴링 방식, 소켓 통신이 사용 불가능한 경우 백업 용도)
      * @param chatRoomId 채팅방 ID
      * @param lastMessageTime 마지막으로 받은 메시지 시간
      * @return 새 메시지 목록
