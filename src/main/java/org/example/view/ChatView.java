@@ -26,6 +26,7 @@ import org.example.repository.MessageRepository;
 import org.example.service.AuthService;
 import org.example.service.BlockchainMessageService;
 import org.example.service.ChatService;
+import org.example.service.ChatService.ChatResult;
 import org.example.socket.ChatMessage;
 import org.example.socket.ChatSocketClient;
 
@@ -589,10 +590,10 @@ public class ChatView extends BorderPane {
         ensureSocketConnection();
 
         // 메시지 전송 (데이터베이스 저장 + 소켓 전송)
-        int messageId = messageRepository.sendMessage(
+        ChatResult chatResult = chatService.sendMessage(
                 currentChatRoom.getChatRoomId(), currentUser.getMemberId(), messageText);
 
-        if (messageId > 0) {
+        if (chatResult.isSuccess()) {
             messageField.clear();
 
             // 메시지 전송 후 스크롤을 맨 아래로 이동

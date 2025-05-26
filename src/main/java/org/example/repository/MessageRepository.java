@@ -166,6 +166,7 @@ public class MessageRepository {
         // Message 객체 생성
         return new Message(
                 0, // 메시지 ID는 데이터베이스에서 할당됨
+                0,
                 chatMessage.getChatRoomId(),
                 chatMessage.getSenderId(),
                 chatMessage.getContent(),
