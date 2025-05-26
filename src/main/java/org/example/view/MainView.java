@@ -5,6 +5,7 @@ import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node; // 올바른 Node 클래스 임포트
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
@@ -22,6 +23,7 @@ import org.example.model.Member;
 import org.example.service.AuthService;
 import org.example.service.ChatService;
 import org.example.service.FriendService;
+import org.example.socket.ChatSocketClient;
 
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +40,7 @@ public class MainView {
     private Timeline checkFriendRequestsTimeline;
     private BorderPane mainBorderPane;
     private ChatRoomsView chatRoomsView;
+    private BorderPane chatPane; // chatPane 필드 추가
 
     public MainView(Stage stage) {
         this.stage = stage;
@@ -162,7 +165,7 @@ public class MainView {
         Tab tab = new Tab("채팅");
 
         // 채팅 관련 컴포넌트 생성
-        BorderPane chatPane = new BorderPane();
+        chatPane = new BorderPane(); // 필드에 할당
 
         // 채팅방 목록 뷰 생성 및 저장
         chatRoomsView = new ChatRoomsView(stage);
@@ -172,35 +175,113 @@ public class MainView {
 
         // 채팅방 선택 시 채팅 화면으로 전환 (선택 콜백 설정)
         chatRoomsView.setOnChatRoomSelectedCallback(chatRoom -> {
-            // 기존 ChatView가 있다면 정리
-            if (chatPane.getCenter() instanceof ChatView) {
-                ((ChatView) chatPane.getCenter()).dispose();
-            }
+            // 1. 현재 화면의 내용을 저장
+            javafx.scene.Node previousContent = chatPane.getCenter();
 
-            // 새로운 ChatView 생성
-            ChatView chatView = new ChatView();
-            chatView.setChatRoom(chatRoom);
+            // 2. 로딩 화면 표시
+            ProgressIndicator progressIndicator = new ProgressIndicator();
+            progressIndicator.setMaxSize(50, 50);
+            Label loadingLabel = new Label("채팅방 연결 중...");
+            loadingLabel.setStyle("-fx-font-size: 14px;");
+            VBox loadingBox = new VBox(10, progressIndicator, loadingLabel);
+            loadingBox.setAlignment(Pos.CENTER);
+            chatPane.setCenter(loadingBox);
 
-            // 뒤로가기 버튼 추가
-            Button backButton = new Button("← 채팅방 목록");
-            backButton.setOnAction(e -> {
-                chatView.setChatRoom(null);
-                chatView.dispose();
-                chatRoomsView.loadChatRooms();
-                chatPane.setCenter(chatRoomsView);
-                chatPane.setTop(null);
-            });
+            // 3. 별도 스레드에서 처리
+            new Thread(() -> {
+                try {
+                    // 소켓 클라이언트 가져오기
+                    ChatSocketClient socketClient = ChatSocketClient.getInstance();
 
-            HBox topBox = new HBox(backButton);
-            topBox.setPadding(new Insets(5));
+                    // 소켓 연결 확인 및 연결 시도
+                    System.out.println("소켓 연결 상태 확인...");
+                    boolean connected = false;
 
-            chatPane.setCenter(chatView);
-            chatPane.setTop(topBox);
+                    if (!socketClient.isConnected()) {
+                        System.out.println("소켓 연결 안됨. 연결 시도...");
+                        connected = socketClient.connect(AuthService.getCurrentUser());
+                        if (!connected) {
+                            throw new Exception("채팅 서버에 연결할 수 없습니다.");
+                        }
+                        System.out.println("소켓 연결 성공");
+                    } else {
+                        connected = true;
+                        System.out.println("이미 소켓 연결됨");
+                    }
+
+                    // 채팅방 입장 명령 전송
+                    System.out.println("채팅방 입장 시도: " + chatRoom.getChatRoomId());
+                    boolean joined = socketClient.joinChatRoom(chatRoom.getChatRoomId());
+
+                    if (!joined) {
+                        throw new Exception("채팅방 입장에 실패했습니다.");
+                    }
+
+                    System.out.println("채팅방 입장 명령 전송 성공");
+
+                    // 채팅 뷰 생성 및 설정
+                    final boolean finalConnected = connected;
+                    Platform.runLater(() -> {
+                        try {
+                            // 새로운 ChatView 생성
+                            ChatView chatView = new ChatView();
+
+                            // 뒤로가기 버튼 추가
+                            Button backButton = new Button("← 채팅방 목록");
+                            backButton.setOnAction(e -> {
+                                // 이전 상태로 돌아가기
+                                if (chatView != null) {
+                                    chatView.dispose();
+                                }
+                                chatRoomsView.loadChatRooms();
+                                chatPane.setCenter(chatRoomsView);
+                                chatPane.setTop(null);
+                            });
+
+                            HBox topBox = new HBox(backButton);
+                            topBox.setPadding(new Insets(5));
+                            chatPane.setTop(topBox);
+
+                            // 이 시점에서는 소켓 연결과 채팅방 입장이 성공한 상태
+                            System.out.println("ChatView 생성 성공, 채팅방 설정 시작");
+                            chatPane.setCenter(chatView);
+
+                            // 이제 채팅방 설정 (여기서는 소켓 처리 제외)
+                            chatView.setChatRoomWithoutSocket(chatRoom, finalConnected);
+
+                            System.out.println("채팅방 화면 설정 완료");
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                            showErrorAndRevert(previousContent, "화면 전환 중 오류가 발생했습니다: " + e.getMessage());
+                        }
+                    });
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    Platform.runLater(() -> {
+                        showErrorAndRevert(previousContent, "채팅방 연결 오류: " + e.getMessage());
+                    });
+                }
+            }).start();
         });
 
         tab.setContent(chatPane);
-
         return tab;
+    }
+
+    /**
+     * 오류 표시 및 이전 화면으로 복귀 도우미 메서드
+     */
+    private void showErrorAndRevert(Node previousContent, String errorMessage) {
+        Alert alert = new Alert(Alert.AlertType.ERROR);
+        alert.setTitle("오류");
+        alert.setHeaderText(null);
+        alert.setContentText(errorMessage);
+        alert.showAndWait();
+
+        // 이전 화면으로 복귀
+        chatPane.setCenter(previousContent);
+        chatPane.setTop(null);
     }
 
     /**

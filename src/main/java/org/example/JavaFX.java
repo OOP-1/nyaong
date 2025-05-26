@@ -1,8 +1,14 @@
 package org.example;
 
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 import javafx.stage.Stage;
+import org.example.model.Member;
+import org.example.service.AuthService;
+import org.example.socket.ChatSocketClient;
 import org.example.utils.DatabaseInitializer;
 import org.example.view.LoginView;
 
@@ -32,6 +38,11 @@ public class JavaFX extends Application {
             LoginView loginView = new LoginView(stage);
             loginView.show();
 
+            // 애플리케이션 종료 시 소켓 연결 종료
+            stage.setOnCloseRequest(event -> {
+                cleanupResources();
+            });
+
         } catch (Exception e) {
             System.err.println("애플리케이션 시작 중 오류 발생: " + e.getMessage());
             e.printStackTrace();
@@ -51,6 +62,40 @@ public class JavaFX extends Application {
         stage.setTitle("Nyaong Chat - 오류");
         stage.setScene(scene);
         stage.show();
+    }
+
+    /**
+     * 애플리케이션 종료 시 자원 정리
+     */
+    private void cleanupResources() {
+        try {
+            // 로그인 상태인 경우 로그아웃
+            if (AuthService.isLoggedIn()) {
+                Member currentUser = AuthService.getCurrentUser();
+                System.out.println("사용자 " + currentUser.getNickname() + " 로그아웃 중...");
+
+                // 소켓 연결 종료
+                ChatSocketClient socketClient = ChatSocketClient.getInstance();
+                if (socketClient.isConnected()) {
+                    socketClient.disconnect();
+                }
+
+                // 로그아웃 처리
+                AuthService authService = new AuthService();
+                authService.logout();
+            }
+        } catch (Exception e) {
+            System.err.println("애플리케이션 종료 중 오류 발생: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 애플리케이션 종료
+     */
+    @Override
+    public void stop() {
+        cleanupResources();
+        Platform.exit();
     }
 
     public static void main(String[] args) {
