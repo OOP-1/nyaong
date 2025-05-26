@@ -17,7 +17,7 @@ public class BlockTest {
 
         for (Message msg : list) {
             System.out.print(msg.getMessageId() + ": ");
-            if (blockchainMessageService.verifyMessage(msg.getBlockchainMessageId(), msg.getMessageContent())) {
+            if (blockchainMessageService.verifyMessage(msg)) {
                 System.out.println("✅");
             } else {
                 System.out.println("🔥");

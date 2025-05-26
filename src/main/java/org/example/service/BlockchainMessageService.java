@@ -7,6 +7,7 @@ import org.example.boundary.BlockchainConnector;
 import org.example.contract.MessageVerifier;
 import org.example.contract.MessageVerifier.MessageVerifiedEventResponse;
 import org.example.model.Member;
+import org.example.model.Message;
 import org.example.utils.HashUtil;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
@@ -16,8 +17,10 @@ public class BlockchainMessageService {
     /**
      * 메시지 내용 검증 (해시 비교)
      */
-    public boolean verifyMessage(int blockchainMessageId, String messageContent) {
+    public boolean verifyMessage(Message msg) {
         try {
+            String messageContent = msg.getMessageContent();
+            int blockchainMessageId = msg.getBlockchainMessageId();
             String storedHashHex = getMessageHash(blockchainMessageId);
             String calculatedHashHex = HashUtil.sha256(messageContent);
 
@@ -31,8 +34,9 @@ public class BlockchainMessageService {
     /**
      * 사용자가 메시지에 서명
      */
-    public boolean signMessage(int blockchainMessageId, Member signer) {
+    public boolean signMessage(Message msg, Member signer) {
         try {
+            int blockchainMessageId = msg.getBlockchainMessageId();
             TransactionReceipt receipt = contract.signMessage(
                     BigInteger.valueOf(blockchainMessageId),
                     signer.getUserId()
@@ -63,8 +67,9 @@ public class BlockchainMessageService {
     /**
      * 메시지 서명자 목록 조회
      */
-    public List<String> getMessageSigners(int blockchainMessageId) {
+    public List<String> getMessageSigners(Message msg) {
         try {
+            int blockchainMessageId = msg.getBlockchainMessageId();
             return contract.getSigners(
                     BigInteger.valueOf(blockchainMessageId)
             ).send();
