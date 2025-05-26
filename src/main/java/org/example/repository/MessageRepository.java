@@ -3,6 +3,9 @@ package org.example.repository;
 import org.example.boundary.DatabaseConnector;
 import org.example.model.Member;
 import org.example.model.Message;
+import org.example.socket.ChatMessage;
+import org.example.socket.ChatMessageType;
+import org.example.socket.ChatSocketClient;
 
 import java.sql.*;
 import java.util.ArrayList;
@@ -10,12 +13,10 @@ import java.util.List;
 
 public class MessageRepository {
 
-    /**
-     * 메시지 전송 (저장)
-     */
     public int sendMessage(int chatRoomId, int blockchainMessageId, int senderId, String content) {
         String sql = "INSERT INTO Messages (chatroom_id, blockchain_message_id, member_id, message_content, created_at) " +
                 "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)";
+        boolean sent = socketClient.sendMessage(chatRoomId, content);
 
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -99,9 +100,6 @@ public class MessageRepository {
         return 0;
     }
 
-    /**
-     * 특정 시간 이후의 새 메시지 조회 (채팅 자동 업데이트용)
-     */
     public List<Message> getNewMessages(int chatRoomId, Timestamp lastMessageTime) {
         String sql = "SELECT m.message_id, m.blockchain_message_id, m.chatroom_id, m.member_id, m.message_content, m.created_at, " +
                 "mem.user_id, mem.nickname, mem.status " +
@@ -131,9 +129,6 @@ public class MessageRepository {
         return messages;
     }
 
-    /**
-     * 로그 검증용 메시지 검색 (조건: 채팅방 ID, 보낸 사람 ID, 시간 범위)
-     */
     public List<Message> searchMessages(Integer chatRoomId, Integer senderId, Timestamp from, Timestamp to) {
         StringBuilder sql = new StringBuilder(
                 "SELECT m.message_id, m.blockchain_message_id, m.chatroom_id, m.member_id, m.message_content, m.created_at, " +
@@ -235,4 +230,30 @@ public class MessageRepository {
         }
     }
 
+}
+
+    public Message convertChatMessageToMessage(ChatMessage chatMessage) {
+        // Member 객체 생성 (발신자 정보)
+        Member sender = null;
+        if (chatMessage.getSenderNickname() != null) {
+            sender = new Member(
+                    chatMessage.getSenderId(),
+                    "", // 사용자 ID는 알 수 없음
+                    "", // 비밀번호는 필요 없음
+                    chatMessage.getSenderNickname(),
+                    chatMessage.getSenderStatus() != null ? chatMessage.getSenderStatus() : "UNKNOWN",
+                    "" // 역할은 필요 없음
+            );
+        }
+
+        // Message 객체 생성
+        return new Message(
+                0, // 메시지 ID는 데이터베이스에서 할당됨
+                chatMessage.getChatRoomId(),
+                chatMessage.getSenderId(),
+                chatMessage.getContent(),
+                chatMessage.getTimestamp(),
+                sender
+        );
+    }
 }
