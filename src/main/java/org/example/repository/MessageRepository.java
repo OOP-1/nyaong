@@ -211,4 +211,28 @@ public class MessageRepository {
                 sender
         );
     }
+
+    public void updateBlockchainMessageId(int msgId, int blockchainMessageId) {
+        String sql = "UPDATE Messages SET blockchain_message_id = ? " +
+                "WHERE message_id = ? " +
+                "ORDER BY created_at DESC LIMIT 1";
+
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql.toString())) {
+
+            pstmt.setInt(1, blockchainMessageId);
+            pstmt.setInt(2, msgId);
+
+            int updatedRows = pstmt.executeUpdate();
+            if (updatedRows == 0) {
+                System.err.println("[" + msgId + "] ❗ 블록체인 ID 업데이트 실패: 해당 메시지를 찾을 수 없음");
+            } else {
+                System.out.println("[" + msgId + "] ✅ 블록체인 ID 업데이트 완료");
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
 }
