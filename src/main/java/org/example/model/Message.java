@@ -12,6 +12,7 @@ public class Message {
     private final StringProperty messageContent;
     private final ObjectProperty<Timestamp> createdAt;
     private Member sender; // 메시지 발신자 정보
+    private boolean verified;
 
     // 기본 생성자
     public Message() {
@@ -107,6 +108,14 @@ public class Message {
 
     public void setSender(Member sender) {
         this.sender = sender;
+    }
+
+    public boolean getVerificationStatus() {
+        return verified;
+    }
+
+    public void setVerificationStatus(boolean verified) {
+        this.verified = verified;
     }
 
     @Override

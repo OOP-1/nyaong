@@ -92,7 +92,11 @@ public class LoginView {
 
         if (success) {
             // 로그인 성공 시 메인 화면으로 이동
-            showMainView();
+            if (authService.getCurrentUser().getRole().equals("USER")) {
+                showMainView();
+            } else {
+                new VerifyView(stage).show();
+            }
         } else {
             messageLabel.setText("아이디 또는 비밀번호가 올바르지 않습니다.");
         }
