@@ -71,8 +71,16 @@ public class VerifyView {
         timeCol.setCellValueFactory(data -> data.getValue().createdAtProperty());
 
         TableColumn<Message, String> statusCol = new TableColumn<>("검증 상태");
-        statusCol.setCellValueFactory(data -> new SimpleStringProperty(
-                data.getValue().getVerificationStatus() ? "✅" : "❌"));
+
+        statusCol.setCellValueFactory(data -> {
+            Message message = data.getValue();
+            if (message.getBlockchainMessageId() == -1) {
+                return new SimpleStringProperty("👀");
+            } else {
+                return new SimpleStringProperty(message.getVerificationStatus() ? "✅" : "❌");
+            }
+        });
+
 
         messageTable.getColumns().addAll(idCol, contentCol, senderCol, timeCol, statusCol);
 
