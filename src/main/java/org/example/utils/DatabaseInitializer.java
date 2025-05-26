@@ -85,7 +85,6 @@ public class DatabaseInitializer {
                     "message_id INT AUTO_INCREMENT PRIMARY KEY," +
                     "message_content TEXT NOT NULL," +
                     "chatroom_id INT NOT NULL," +
-                    "blockchain_message_id INT NOT NULL," +
                     "member_id INT NOT NULL," +
                     "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP," +
                     "FOREIGN KEY (chatroom_id) REFERENCES ChatRooms(chatroom_id) ON DELETE CASCADE," +
