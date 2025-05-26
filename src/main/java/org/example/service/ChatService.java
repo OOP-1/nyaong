@@ -26,6 +26,7 @@ public class ChatService {
     private final MessageRepository messageRepository;
     private final MemberRepository memberRepository;
     private final ChatSocketClient socketClient;
+    private final BlockchainMessageService blockchainMessageService = new BlockchainMessageService();
 
     public ChatService() {
         this.chatRoomRepository = new ChatRoomRepository();
@@ -249,9 +250,19 @@ public class ChatService {
             return new ChatResult(false, "메시지 내용을 입력해주세요.", chatRoomId);
         }
 
-        int messageId = messageRepository.sendMessage(chatRoomId, senderId, content);
+        // 블록체인 처리 기다리지 않고, 메시지 먼저 저장 (blockchainId는 -1로 임시 저장)
+        int msgId = messageRepository.sendMessage(chatRoomId, -1, senderId, content);
 
-        if (messageId > 0) {
+        // 메시지를 블록체인에 저장하는 작업을 별도 스레드로 처리
+        new Thread(() -> {
+            int blockchainId = blockchainMessageService.addMessage(senderId, content);
+            if (blockchainId > 0) {
+                // blockchainId가 성공적으로 발급되면, 기존 메시지의 blockchainMessageId를 갱신
+                messageRepository.updateBlockchainMessageId(msgId, blockchainId);
+            }
+        }).start();
+
+        if (msgId > 0) {
             return new ChatResult(true, "메시지가 전송되었습니다.", chatRoomId);
         } else {
             return new ChatResult(false, "메시지 전송에 실패했습니다.", chatRoomId);

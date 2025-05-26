@@ -6,6 +6,9 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.*;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -21,6 +24,7 @@ import org.example.model.Message;
 import org.example.repository.MemberRepository;
 import org.example.repository.MessageRepository;
 import org.example.service.AuthService;
+import org.example.service.BlockchainMessageService;
 import org.example.service.ChatService;
 import org.example.socket.ChatMessage;
 import org.example.socket.ChatSocketClient;
@@ -38,6 +42,7 @@ import java.util.function.Consumer;
 public class ChatView extends BorderPane {
     private final ChatService chatService;
     private final MessageRepository messageRepository;
+    private final BlockchainMessageService blockchainService = new BlockchainMessageService();
     private final Member currentUser;
     private ChatRoom currentChatRoom;
 
@@ -907,7 +912,7 @@ public class ChatView extends BorderPane {
     }
 
     /**
-     * 메시지 박스 생성
+     * 메시지 박스 생성 (우클릭 기능 추가)
      */
     private HBox createMessageBox(Message message) {
         HBox messageBox = new HBox(10);
@@ -921,22 +926,22 @@ public class ChatView extends BorderPane {
             VBox contentBox = new VBox(5);
             contentBox.setAlignment(Pos.CENTER_RIGHT);
 
-            // 시간 표시
             Label timeLabel = new Label(timeFormat.format(message.getCreatedAt()));
             timeLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #808080;");
 
-            // 메시지 내용
             Label messageLabel = new Label(message.getMessageContent());
             messageLabel.setWrapText(true);
             messageLabel.setStyle("-fx-background-color: #DCF8C6; -fx-padding: 8; -fx-background-radius: 8;");
             messageLabel.setMaxWidth(300);
+
+            // 우클릭 메뉴 추가
+            addRightClickMenu(messageLabel, message);
 
             contentBox.getChildren().addAll(timeLabel, messageLabel);
             messageBox.getChildren().add(contentBox);
         } else {
             messageBox.setAlignment(Pos.CENTER_LEFT);
 
-            // 프로필 아이콘
             Circle profileCircle = new Circle(20, Color.LIGHTGRAY);
 
             VBox contentBox = new VBox(5);
@@ -948,13 +953,14 @@ public class ChatView extends BorderPane {
 
             HBox messageTimeBox = new HBox(10);
 
-            // 메시지 내용
             Label messageLabel = new Label(message.getMessageContent());
             messageLabel.setWrapText(true);
             messageLabel.setStyle("-fx-background-color: #FFFFFF; -fx-padding: 8; -fx-background-radius: 8; -fx-border-color: #E0E0E0; -fx-border-radius: 8;");
             messageLabel.setMaxWidth(300);
 
-            // 시간 표시
+            // 우클릭 메뉴 추가
+            addRightClickMenu(messageLabel, message);
+
             Label timeLabel = new Label(timeFormat.format(message.getCreatedAt()));
             timeLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: #808080;");
 
@@ -966,6 +972,65 @@ public class ChatView extends BorderPane {
         }
 
         return messageBox;
+    }
+
+    /**
+     * 메시지 라벨에 우클릭 메뉴 추가
+     */
+    private void addRightClickMenu(Label messageLabel, Message message) {
+        // 우클릭 메뉴 생성
+        ContextMenu contextMenu = new ContextMenu();
+
+        MenuItem signItem = new MenuItem("전자서명 추가");
+        signItem.setOnAction(e -> handleSignAction(message));
+
+        MenuItem viewSignersItem = new MenuItem("전자서명 목록 조회 (사용자 ID)");
+        viewSignersItem.setOnAction(e -> {
+            try {
+                new SignView().showSigners(message);
+            } catch (Exception ex) {
+                showAlert(Alert.AlertType.ERROR, "오류", "전자서명 목록 조회 중 오류가 발생했습니다: " + ex.getMessage());
+            }
+        });
+
+
+        contextMenu.getItems().addAll(signItem, viewSignersItem);
+
+        // 우클릭 이벤트 처리
+        messageLabel.setOnMouseClicked(event -> {
+            if (event.getButton() == MouseButton.SECONDARY) {
+                contextMenu.show(messageLabel, event.getScreenX(), event.getScreenY());
+            } else {
+                contextMenu.hide();
+            }
+        });
+    }
+
+    /**
+     * 전자서명 처리
+     */
+    private void handleSignAction(Message message) {
+        try {
+            SignDialog dialog = new SignDialog();
+
+            boolean alreadySigned = blockchainService.getSigned(message.getBlockchainMessageId(), currentUser.getUserId());
+            if (alreadySigned) {
+                dialog.showAlreadySignedAlert();
+                return;
+            }
+
+            boolean confirmed = dialog.showConfirmation();
+            if (!confirmed) return;
+
+            boolean success = blockchainService.signMessage(message, currentUser);
+            if (success) {
+                dialog.showSuccessAlert();
+            } else {
+                dialog.showFailureAlert();
+            }
+        } catch (Exception e) {
+            showAlert(Alert.AlertType.ERROR, "전자서명 오류", "전자서명 처리 중 오류가 발생했습니다: " + e.getMessage());
+        }
     }
 
     /**
