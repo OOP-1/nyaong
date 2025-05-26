@@ -25,7 +25,9 @@ public class SignView {
 
         List<String> signers = blockchainService.getMessageSigners(message);
 
-        if (signers.isEmpty()) {
+        if (message.getBlockchainMessageId() == -1) {
+            vbox.getChildren().add(new Label("블록체인 등록이 진행중인 메세지입니다."));
+        } else if (signers.isEmpty()) {
             vbox.getChildren().add(new Label("아직 전자서명한 사용자가 없습니다."));
         } else {
             vbox.getChildren().add(new Label("전자서명자 목록:"));

@@ -395,6 +395,7 @@ public class ChatView extends BorderPane {
             final ChatRoom chatRoomToLeave = currentChatRoom;
             final int currentUserId = currentUser.getMemberId();
 
+
             // 로딩 인디케이터 표시
             showLoadingOverlay("채팅방에서 나가는 중...");
 

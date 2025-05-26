@@ -74,7 +74,7 @@ public class BlockchainMessageService {
                     BigInteger.valueOf(blockchainMessageId)
             ).send();
         } catch (Exception e) {
-            e.printStackTrace();
+            System.out.println("id -1 : 블록체인 등록중인 메시지입니다.");
             return new ArrayList<>();
         }
     }
