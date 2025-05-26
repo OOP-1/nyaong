@@ -1,6 +1,7 @@
 // src/main/java/org/example/view/ChatView.java
 package org.example.view;
 
+import java.util.ArrayList;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -607,22 +608,70 @@ public class ChatView extends BorderPane {
     }
 
     /**
-     * 메시지 목록 로드 - 스크롤 문제 해결
+     * 메시지 목록 로드 - 실제 데이터베이스에서 메시지를 가져와서 표시
      */
     private void loadMessages() {
         if (currentChatRoom == null) {
             return;
         }
 
-        // 초기 로드 - 최근 메시지부터 일정 개수만큼
+        System.out.println("📋 채팅방 " + currentChatRoom.getChatRoomId() + "의 메시지 로딩 중...");
+
+        // 데이터베이스에서 최근 메시지들 가져오기
         List<Message> messages = messageRepository.getMessagesByChatRoomId(
-                currentChatRoom.getChatRoomId(), LOAD_MESSAGE_COUNT, messageOffset);
+                currentChatRoom.getChatRoomId(), LOAD_MESSAGE_COUNT, 0);
 
-        // UI에 메시지 추가
-        messagesContainer.getChildren().clear();
+        System.out.println("📋 로드된 메시지 수: " + messages.size());
 
+        if (messages.isEmpty()) {
+            System.out.println("📋 표시할 메시지가 없습니다.");
+            // 빈 채팅방 안내 메시지 표시
+            Label emptyLabel = new Label("대화를 시작해보세요!");
+            emptyLabel.setStyle("-fx-text-fill: #888; -fx-font-style: italic;");
+            HBox emptyBox = new HBox(emptyLabel);
+            emptyBox.setAlignment(Pos.CENTER);
+            emptyBox.setPadding(new Insets(20));
+            messagesContainer.getChildren().add(emptyBox);
+        } else {
+            // 메시지들을 UI에 표시
+            displayMessages(messages);
+
+            // 마지막 메시지 시간 업데이트
+            if (!messages.isEmpty()) {
+                lastMessageTime = messages.get(messages.size() - 1).getCreatedAt();
+            }
+        }
+
+        // 메시지 로딩 완료 후 스크롤을 맨 아래로
+        Platform.runLater(() -> {
+            ScrollPane scrollPane = (ScrollPane) getCenter();
+            // 레이아웃이 완료될 때까지 기다린 후 스크롤
+            messagesContainer.layoutBoundsProperty().addListener(new javafx.beans.value.ChangeListener<javafx.geometry.Bounds>() {
+                @Override
+                public void changed(javafx.beans.value.ObservableValue<? extends javafx.geometry.Bounds> obs,
+                                    javafx.geometry.Bounds oldBounds, javafx.geometry.Bounds newBounds) {
+                    Platform.runLater(() -> scrollPane.setVvalue(1.0));
+                    // 리스너 제거 (한 번만 실행되도록)
+                    messagesContainer.layoutBoundsProperty().removeListener(this);
+                }
+            });
+
+            // 즉시 스크롤도 시도
+            scrollPane.setVvalue(1.0);
+        });
+    }
+
+    /**
+     * 메시지 목록을 UI에 표시하는 헬퍼 메서드
+     */
+    private void displayMessages(List<Message> messages) {
         String currentDateStr = null;
-        for (Message message : messages) {
+
+        // *** 메시지를 시간순으로 정렬 (오래된 메시지부터 표시) ***
+        List<Message> sortedMessages = new ArrayList<>(messages);
+        sortedMessages.sort((m1, m2) -> m1.getCreatedAt().compareTo(m2.getCreatedAt()));
+
+        for (Message message : sortedMessages) {
             // 날짜가 바뀌면 날짜 구분선 추가
             String messageDate = dateFormat.format(message.getCreatedAt());
             if (!messageDate.equals(currentDateStr)) {
@@ -630,30 +679,9 @@ public class ChatView extends BorderPane {
                 addDateSeparator(currentDateStr);
             }
 
+            // 메시지 UI에 추가
             addMessageToUI(message);
-
-            // 가장 최근 메시지 시간 기록
-            if (lastMessageTime == null || message.getCreatedAt().after(lastMessageTime)) {
-                lastMessageTime = message.getCreatedAt();
-            }
         }
-
-        // 초기 로드 시에는 항상 맨 아래로 스크롤
-        Platform.runLater(() -> {
-            ScrollPane scrollPane = (ScrollPane) getCenter();
-            // 레이아웃이 완전히 완료될 때까지 기다린 후 스크롤
-            messagesContainer.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> {
-                Platform.runLater(() -> scrollPane.setVvalue(1.0));
-            });
-
-            // 즉시 스크롤도 시도
-            scrollPane.setVvalue(1.0);
-
-            // 추가 보장을 위한 지연된 스크롤
-            Platform.runLater(() -> {
-                scrollPane.setVvalue(1.0);
-            });
-        });
     }
 
     /**
