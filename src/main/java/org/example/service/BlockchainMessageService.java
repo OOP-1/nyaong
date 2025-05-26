@@ -1,52 +1,30 @@
 package org.example.service;
 
 import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import org.example.boundary.BlockchainConnector;
 import org.example.contract.MessageVerifier;
 import org.example.contract.MessageVerifier.MessageVerifiedEventResponse;
 import org.example.model.Member;
-import org.example.model.Message;
 import org.example.utils.HashUtil;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 
 public class BlockchainMessageService {
-    BlockchainConnector connect = new BlockchainConnector();
-    MessageVerifier contract = connect.getContract();
+    private final MessageVerifier contract = new BlockchainConnector().getContract();
 
     /**
-     * 메시지 내용을 블록체인에 저장하고 검증 시작
+     * 메시지 내용 검증 (해시 비교)
      */
-    public int verifyMessage(Message message) {
+    public boolean verifyMessage(int blockchainMessageId, String messageContent) {
         try {
-            // 메시지 내용의 해시값 생성 (HashUtil 사용)
-            String hashHex = HashUtil.sha256(message.getMessageContent());
-            byte[] hashBytes = HashUtil.hexStringToBytes32(hashHex);
+            String storedHashHex = getMessageHash(blockchainMessageId);
+            String calculatedHashHex = HashUtil.sha256(messageContent);
 
-            // 발신자 정보 가져오기
-            String senderUserId = message.getSender().getUserId();
-
-            // 컨트랙트 함수 호출
-            TransactionReceipt receipt = contract.verifyMessage(
-                    senderUserId,
-                    hashBytes  // bytes32 타입으로 전달
-            ).send();
-
-            // 이벤트에서 메시지 ID 추출
-            List<MessageVerifiedEventResponse> events =
-                    contract.getMessageVerifiedEvents(receipt);
-
-            if (!events.isEmpty()) {
-                return events.get(0).messageId.intValue();
-            }
-
-            return -1; // 실패
+            return storedHashHex != null && storedHashHex.equals(calculatedHashHex);
         } catch (Exception e) {
             e.printStackTrace();
-            return -1;
+            return false;
         }
     }
 
@@ -70,7 +48,7 @@ public class BlockchainMessageService {
     /**
      * 메시지 서명 여부 확인
      */
-    public boolean hasUserSigned(int blockchainMessageId, String userId) {
+    public boolean getSigned(int blockchainMessageId, String userId) {
         try {
             return contract.hasUserSigned(
                     BigInteger.valueOf(blockchainMessageId),
@@ -97,9 +75,39 @@ public class BlockchainMessageService {
     }
 
     /**
-     * 메시지 해시값 조회 (16진수 문자열로 변환)
+     * 메시지 내용을 블록체인에 저장하고 검증 시작
      */
-    public String getMessageHash(int blockchainMessageId) {
+    public int addMessage(int senderId, String content) {
+        try {
+            // 메시지 내용의 해시값 생성 (HashUtil 사용)
+            String hashHex = HashUtil.sha256(content);
+            byte[] hashBytes = HashUtil.hexStringToBytes32(hashHex);
+
+            // 발신자 정보 가져오기
+            String senderUserId = senderId + "";
+
+            // 컨트랙트 함수 호출
+            TransactionReceipt receipt = contract.verifyMessage(
+                    senderUserId,
+                    hashBytes  // bytes32 타입으로 전달
+            ).send();
+
+            // 이벤트에서 메시지 ID 추출
+            List<MessageVerifiedEventResponse> events =
+                    contract.getMessageVerifiedEvents(receipt);
+
+            if (!events.isEmpty()) {
+                return events.get(0).messageId.intValue();
+            }
+
+            return -1; // 실패
+        } catch (Exception e) {
+            e.printStackTrace();
+            return -1;
+        }
+    }
+
+    private String getMessageHash(int blockchainMessageId) {
         try {
             byte[] hashBytes = contract.getMessageHash(
                     BigInteger.valueOf(blockchainMessageId)
@@ -109,21 +117,6 @@ public class BlockchainMessageService {
         } catch (Exception e) {
             e.printStackTrace();
             return null;
-        }
-    }
-
-    /**
-     * 메시지 내용 검증 (해시 비교)
-     */
-    public boolean verifyMessageContent(int blockchainMessageId, String messageContent) {
-        try {
-            String storedHashHex = getMessageHash(blockchainMessageId);
-            String calculatedHashHex = HashUtil.sha256(messageContent);
-
-            return storedHashHex != null && storedHashHex.equals(calculatedHashHex);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return false;
         }
     }
 }

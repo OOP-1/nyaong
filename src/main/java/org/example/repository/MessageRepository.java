@@ -18,16 +18,17 @@ public class MessageRepository {
      * @param content 메시지 내용
      * @return 생성된 메시지 ID
      */
-    public int sendMessage(int chatRoomId, int senderId, String content) {
-        String sql = "INSERT INTO Messages (chatroom_id, member_id, message_content, created_at) " +
-                "VALUES (?, ?, ?, CURRENT_TIMESTAMP)";
+    public int sendMessage(int chatRoomId, int blockchainMessageId, int senderId, String content) {
+        String sql = "INSERT INTO Messages (chatroom_id, blockchain_message_id, member_id, message_content, created_at) " +
+                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)";
 
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
 
             pstmt.setInt(1, chatRoomId);
-            pstmt.setInt(2, senderId);
-            pstmt.setString(3, content);
+            pstmt.setInt(2, blockchainMessageId);
+            pstmt.setInt(3, senderId);
+            pstmt.setString(4, content);
 
             int affectedRows = pstmt.executeUpdate();
             if (affectedRows > 0) {
@@ -53,7 +54,7 @@ public class MessageRepository {
      * @return 메시지 목록
      */
     public List<Message> getMessagesByChatRoomId(int chatRoomId, int limit, int offset) {
-        String sql = "SELECT m.message_id, m.chatroom_id, m.member_id, m.message_content, m.created_at, " +
+        String sql = "SELECT m.message_id, m.blockchain_message_id, m.chatroom_id, m.member_id, m.message_content, m.created_at, " +
                 "mem.user_id, mem.nickname, mem.status " +
                 "FROM Messages m " +
                 "JOIN Members mem ON m.member_id = mem.member_id " +
@@ -83,6 +84,7 @@ public class MessageRepository {
 
                     Message message = new Message(
                             rs.getInt("message_id"),
+                            rs.getInt("blockchain_message_id"),
                             rs.getInt("chatroom_id"),
                             rs.getInt("member_id"),
                             rs.getString("message_content"),
@@ -134,7 +136,7 @@ public class MessageRepository {
      * @return 새 메시지 목록
      */
     public List<Message> getNewMessages(int chatRoomId, Timestamp lastMessageTime) {
-        String sql = "SELECT m.message_id, m.chatroom_id, m.member_id, m.message_content, m.created_at, " +
+        String sql = "SELECT m.message_id, m.blockchain_message_id, m.chatroom_id, m.member_id, m.message_content, m.created_at, " +
                 "mem.user_id, mem.nickname, mem.status " +
                 "FROM Messages m " +
                 "JOIN Members mem ON m.member_id = mem.member_id " +
@@ -162,6 +164,7 @@ public class MessageRepository {
 
                     Message message = new Message(
                             rs.getInt("message_id"),
+                            rs.getInt("blockchain_message_id"),
                             rs.getInt("chatroom_id"),
                             rs.getInt("member_id"),
                             rs.getString("message_content"),

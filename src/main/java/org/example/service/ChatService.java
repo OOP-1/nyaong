@@ -21,6 +21,7 @@ public class ChatService {
     private final ChatRoomRepository chatRoomRepository;
     private final MessageRepository messageRepository;
     private final MemberRepository memberRepository;
+    private final BlockchainMessageService blockchainMessageService = new BlockchainMessageService();
 
     public ChatService() {
         this.chatRoomRepository = new ChatRoomRepository();
@@ -190,9 +191,10 @@ public class ChatService {
             return new ChatResult(false, "메시지 내용을 입력해주세요.", chatRoomId);
         }
 
-        int messageId = messageRepository.sendMessage(chatRoomId, senderId, content);
+        int blockchainId = blockchainMessageService.addMessage(senderId, content);
+        int msgId = messageRepository.sendMessage(chatRoomId, blockchainId, senderId, content);
 
-        if (messageId > 0) {
+        if (msgId > 0) {
             return new ChatResult(true, "메시지가 전송되었습니다.", chatRoomId);
         } else {
             return new ChatResult(false, "메시지 전송에 실패했습니다.", chatRoomId);
