@@ -604,8 +604,11 @@ public class ChatView extends BorderPane {
                 scrollPane.setVvalue(1.0);
             });
         } else {
-            showAlert(Alert.AlertType.ERROR, "메시지 전송 실패", "메시지를 전송하지 못했습니다.");
-        }
+            showAlert(
+                Alert.AlertType.ERROR,
+                "메시지 전송 실패",
+                chatResult.getMessage()        // ← 서비스에서 온 상세 메시지
+            );        }
     }
 
     /**
