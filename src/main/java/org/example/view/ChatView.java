@@ -317,7 +317,49 @@ public class ChatView extends BorderPane {
     }
 
     /**
-     * 소켓으로부터 수신된 메시지 처리 - 날짜 구분선 중복 문제 해결
+     * 확실하게 스크롤을 맨 아래로 이동시키는 메서드
+     */
+    private void scrollToBottomReliably() {
+        ScrollPane scrollPane = (ScrollPane) getCenter();
+        if (scrollPane == null) return;
+
+        // 레이아웃이 완료될 때까지 기다린 후 스크롤
+        messagesContainer.applyCss();
+        messagesContainer.layout();
+
+        Platform.runLater(() -> {
+            scrollPane.setVvalue(1.0);
+            // 추가 보장을 위해 한 번 더
+            Platform.runLater(() -> {
+                scrollPane.setVvalue(1.0);
+            });
+        });
+    }
+
+    /**
+     * 레이아웃 변경 리스너를 사용한 안전한 스크롤
+     */
+    private void scrollToBottomAfterLayout() {
+        ScrollPane scrollPane = (ScrollPane) getCenter();
+        if (scrollPane == null) return;
+
+        // 레이아웃 변경을 감지하는 리스너 추가
+        messagesContainer.layoutBoundsProperty().addListener(new javafx.beans.value.ChangeListener<javafx.geometry.Bounds>() {
+            @Override
+            public void changed(javafx.beans.value.ObservableValue<? extends javafx.geometry.Bounds> obs,
+                                javafx.geometry.Bounds oldBounds, javafx.geometry.Bounds newBounds) {
+                // 레이아웃이 완료되면 스크롤 이동
+                Platform.runLater(() -> {
+                    scrollPane.setVvalue(1.0);
+                });
+                // 일회성 리스너이므로 제거
+                messagesContainer.layoutBoundsProperty().removeListener(this);
+            }
+        });
+    }
+
+    /**
+     * 소켓으로부터 수신된 메시지 처리 - 스크롤 문제 해결
      */
     private void handleIncomingMessage(ChatMessage chatMessage) {
         Platform.runLater(() -> {
@@ -331,7 +373,7 @@ public class ChatView extends BorderPane {
             // 날짜가 바뀌면 날짜 구분선 추가
             String messageDate = dateFormat.format(message.getCreatedAt());
 
-            // 이미 같은 날짜의 구분선이 있는지 확인 - 수정된 로직
+            // 이미 같은 날짜의 구분선이 있는지 확인
             boolean needDateSeparator = true;
             if (!messagesContainer.getChildren().isEmpty()) {
                 // 모든 노드를 역순으로 검사하여 가장 최근의 날짜 구분선 찾기
@@ -367,15 +409,7 @@ public class ChatView extends BorderPane {
 
             // 새 메시지가 도착했을 때 자동 스크롤 (사용자가 맨 아래에 있었던 경우에만)
             if (wasAtBottom) {
-                // UI 업데이트가 완료된 후 스크롤 이동을 위해 추가 지연
-                Platform.runLater(() -> {
-                    scrollPane.setVvalue(1.0);
-
-                    // 한 번 더 확실히 하기 위해 약간의 지연 후 다시 스크롤
-                    Platform.runLater(() -> {
-                        scrollPane.setVvalue(1.0);
-                    });
-                });
+                scrollToBottomAfterLayout();
             }
 
             // 마지막 메시지 시간 업데이트
@@ -609,21 +643,19 @@ public class ChatView extends BorderPane {
         if (chatResult.isSuccess()) {
             messageField.clear();
 
-            // 메시지 전송 후 스크롤을 맨 아래로 이동
-            Platform.runLater(() -> {
-                ScrollPane scrollPane = (ScrollPane) getCenter();
-                scrollPane.setVvalue(1.0);
-            });
+            // 메시지 전송 후 확실하게 스크롤을 맨 아래로 이동
+            scrollToBottomAfterLayout();
         } else {
             showAlert(
-                Alert.AlertType.ERROR,
-                "메시지 전송 실패",
-                chatResult.getMessage()        // ← 서비스에서 온 상세 메시지
-            );        }
+                    Alert.AlertType.ERROR,
+                    "메시지 전송 실패",
+                    chatResult.getMessage()
+            );
+        }
     }
 
     /**
-     * 메시지 목록 로드 - 실제 데이터베이스에서 메시지를 가져와서 표시
+     * 메시지 목록 로드 - 스크롤 문제 해결
      */
     private void loadMessages() {
         if (currentChatRoom == null) {
@@ -657,27 +689,12 @@ public class ChatView extends BorderPane {
             }
         }
 
-        // 메시지 로딩 완료 후 스크롤을 맨 아래로
-        Platform.runLater(() -> {
-            ScrollPane scrollPane = (ScrollPane) getCenter();
-            // 레이아웃이 완료될 때까지 기다린 후 스크롤
-            messagesContainer.layoutBoundsProperty().addListener(new javafx.beans.value.ChangeListener<javafx.geometry.Bounds>() {
-                @Override
-                public void changed(javafx.beans.value.ObservableValue<? extends javafx.geometry.Bounds> obs,
-                                    javafx.geometry.Bounds oldBounds, javafx.geometry.Bounds newBounds) {
-                    Platform.runLater(() -> scrollPane.setVvalue(1.0));
-                    // 리스너 제거 (한 번만 실행되도록)
-                    messagesContainer.layoutBoundsProperty().removeListener(this);
-                }
-            });
-
-            // 즉시 스크롤도 시도
-            scrollPane.setVvalue(1.0);
-        });
+        // 메시지 로딩 완료 후 스크롤을 맨 아래로 - 개선된 방법
+        scrollToBottomAfterLayout();
     }
 
     /**
-     * 메시지 목록을 UI에 표시하는 헬퍼 메서드
+     * 메시지 목록을 UI에 표시하는 헬퍼 메서드 - 날짜 구분선 중복 문제 해결
      */
     private void displayMessages(List<Message> messages) {
         String currentDateStr = null;
@@ -687,11 +704,35 @@ public class ChatView extends BorderPane {
         sortedMessages.sort((m1, m2) -> m1.getCreatedAt().compareTo(m2.getCreatedAt()));
 
         for (Message message : sortedMessages) {
-            // 날짜가 바뀌면 날짜 구분선 추가
+            // 날짜가 바뀌면 날짜 구분선 추가 - 개선된 로직
             String messageDate = dateFormat.format(message.getCreatedAt());
             if (!messageDate.equals(currentDateStr)) {
                 currentDateStr = messageDate;
-                addDateSeparator(currentDateStr);
+
+                // 이미 같은 날짜의 구분선이 있는지 확인
+                boolean needDateSeparator = true;
+                if (!messagesContainer.getChildren().isEmpty()) {
+                    // 현재 컨테이너에서 같은 날짜 구분선이 있는지 확인
+                    for (Node node : messagesContainer.getChildren()) {
+                        if (node instanceof HBox) {
+                            HBox hbox = (HBox) node;
+                            if (!hbox.getChildren().isEmpty() && hbox.getChildren().get(0) instanceof Label) {
+                                Label label = (Label) hbox.getChildren().get(0);
+                                String labelText = label.getText();
+
+                                // 날짜 형식인지 확인하고 같은 날짜인지 체크
+                                if (labelText.matches("\\d{4}-\\d{2}-\\d{2}") && labelText.equals(messageDate)) {
+                                    needDateSeparator = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (needDateSeparator) {
+                    addDateSeparator(currentDateStr);
+                }
             }
 
             // 메시지 UI에 추가
