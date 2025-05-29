@@ -16,6 +16,7 @@ import org.example.service.ChatService;
 import org.example.service.FriendService;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -29,6 +30,7 @@ public class GroupChatDialog extends Dialog<Boolean> {
     private final ListView<Friend> friendsListView;
     private final TextField chatNameField;
 
+    // 생성자 부분에서 프롬프트 텍스트 변경
     public GroupChatDialog(Stage owner) {
         this.friendService = new FriendService();
         this.chatService = new ChatService();
@@ -40,10 +42,10 @@ public class GroupChatDialog extends Dialog<Boolean> {
         initModality(Modality.APPLICATION_MODAL);
         setHeaderText("그룹 채팅에 초대할 친구를 선택하세요");
 
-        // 채팅방 이름 입력 필드
-        Label nameLabel = new Label("채팅방 이름:");
+        // 채팅방 이름 입력 필드 - 선택사항으로 변경
+        Label nameLabel = new Label("채팅방 이름 (선택사항):");
         chatNameField = new TextField();
-        chatNameField.setPromptText("채팅방 이름 입력");
+        chatNameField.setPromptText("비워두면 자동으로 생성됩니다");
 
         // 친구 목록 (다중 선택 가능)
         friendsListView = new ListView<>();
@@ -107,15 +109,16 @@ public class GroupChatDialog extends Dialog<Boolean> {
      */
     private void createGroupChat() {
         String chatName = chatNameField.getText().trim();
-        if (chatName.isEmpty()) {
-            showAlert(Alert.AlertType.WARNING, "입력 확인", "채팅방 이름을 입력해주세요.");
-            return;
-        }
 
         List<Friend> selectedFriends = friendsListView.getSelectionModel().getSelectedItems();
         if (selectedFriends.isEmpty()) {
             showAlert(Alert.AlertType.WARNING, "선택 확인", "최소 한 명 이상의 친구를 선택해주세요.");
             return;
+        }
+
+        // 채팅방 이름이 비어있으면 자동으로 생성
+        if (chatName.isEmpty()) {
+            chatName = generateGroupChatName(selectedFriends);
         }
 
         // 선택한 친구들의 ID 목록 생성
@@ -135,6 +138,30 @@ public class GroupChatDialog extends Dialog<Boolean> {
             showAlert(Alert.AlertType.ERROR, "채팅방 생성 실패", result.getMessage());
         }
     }
+
+    /**
+     * 선택된 친구들의 이름으로 그룹채팅 이름 자동 생성
+     * @param selectedFriends 선택된 친구 목록
+     * @return 생성된 채팅방 이름 (예: "철수, 영희, 민수의 그룹채팅")
+     */
+    private String generateGroupChatName(List<Friend> selectedFriends) {
+        // 현재 사용자 이름도 포함하여 모든 참여자 이름 수집
+        List<String> participantNames = new ArrayList<>();
+        participantNames.add(currentUser.getNickname());
+
+        // 선택된 친구들 이름 추가
+        for (Friend friend : selectedFriends) {
+            participantNames.add(friend.getFriendInfo().getNickname());
+        }
+
+        // 이름들을 정렬 (일관성을 위해)
+        Collections.sort(participantNames);
+
+        // "이름1, 이름2, 이름3의 그룹채팅" 형식으로 생성
+        String namesString = String.join(", ", participantNames);
+        return namesString + "의 채팅";
+    }
+
 
     /**
      * 알림창 표시

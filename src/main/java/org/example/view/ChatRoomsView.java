@@ -22,6 +22,7 @@ import java.text.SimpleDateFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * 채팅방 목록 및 관리 화면
@@ -53,12 +54,12 @@ public class ChatRoomsView extends VBox {
         // 채팅방 목록
         chatRoomsListView = new ListView<>();
         chatRoomsListView.setCellFactory(param -> new ChatRoomListCell());
-        chatRoomsListView.getSelectionModel().selectedItemProperty().addListener(
-                (observable, oldValue, newValue) -> {
-                    if (newValue != null && onChatRoomSelectedCallback != null) {
-                        onChatRoomSelectedCallback.accept(newValue);
-                    }
-                });
+//        chatRoomsListView.getSelectionModel().selectedItemProperty().addListener(
+//                (observable, oldValue, newValue) -> {
+//                    if (newValue != null && onChatRoomSelectedCallback != null) {
+//                        onChatRoomSelectedCallback.accept(newValue);
+//                    }
+//                });
         VBox.setVgrow(chatRoomsListView, Priority.ALWAYS);
         getChildren().add(chatRoomsListView);
 
@@ -171,23 +172,27 @@ public class ChatRoomsView extends VBox {
         MenuItem infoMenuItem = new MenuItem("채팅방 정보");
         infoMenuItem.setOnAction(e -> showChatRoomInfo(chatRoom));
 
+        // 채팅방 이름 변경 메뉴 항목 - 모든 채팅방에 추가
+        MenuItem renameMenuItem = new MenuItem("채팅방 이름 변경");
+        renameMenuItem.setOnAction(e -> renameChatRoom(chatRoom));
+
         // 채팅방 나가기 메뉴 항목
         MenuItem leaveMenuItem = new MenuItem("채팅방 나가기");
         leaveMenuItem.setOnAction(e -> leaveChatRoom(chatRoom));
 
-        contextMenu.getItems().addAll(infoMenuItem, leaveMenuItem);
+        // 기본 메뉴 항목들 추가
+        contextMenu.getItems().addAll(infoMenuItem, renameMenuItem);
 
-        // 그룹 채팅인 경우 이름 변경 메뉴 추가
+        // 그룹 채팅인 경우 멤버 초대 메뉴 추가
         if (chatRoom.isGroupChat()) {
-            MenuItem renameMenuItem = new MenuItem("채팅방 이름 변경");
-            renameMenuItem.setOnAction(e -> renameChatRoom(chatRoom));
-
             MenuItem inviteMenuItem = new MenuItem("멤버 초대");
             inviteMenuItem.setOnAction(e -> inviteMember(chatRoom));
-
-            contextMenu.getItems().add(1, renameMenuItem);
-            contextMenu.getItems().add(2, inviteMenuItem);
+            contextMenu.getItems().add(inviteMenuItem);
         }
+
+        // 나가기 메뉴는 맨 마지막에 추가
+        contextMenu.getItems().add(new SeparatorMenuItem());
+        contextMenu.getItems().add(leaveMenuItem);
 
         return contextMenu;
     }
@@ -219,25 +224,69 @@ public class ChatRoomsView extends VBox {
      * 채팅방 이름 변경
      */
     private void renameChatRoom(ChatRoom chatRoom) {
-        TextInputDialog dialog = new TextInputDialog(chatRoom.getChatRoomName());
+        // 현재 표시되는 이름을 기본값으로 설정
+        String currentDisplayName = getCurrentDisplayName(chatRoom);
+
+        TextInputDialog dialog = new TextInputDialog(currentDisplayName);
         dialog.setTitle("채팅방 이름 변경");
         dialog.setHeaderText("새로운 채팅방 이름을 입력하세요");
         dialog.setContentText("이름:");
 
+        // 다이얼로그 크기 조정
+        dialog.getDialogPane().setPrefWidth(400);
+
         Optional<String> result = dialog.showAndWait();
         if (result.isPresent() && !result.get().trim().isEmpty()) {
+            String newName = result.get().trim();
+
             ChatService.ChatResult updateResult = chatService.updateChatRoomName(
-                    chatRoom.getChatRoomId(), result.get().trim());
+                    chatRoom.getChatRoomId(), newName);
 
             if (updateResult.isSuccess()) {
-                loadChatRooms();
+                loadChatRooms(); // 목록 새로고침
                 showAlert(Alert.AlertType.INFORMATION, "채팅방 이름 변경",
-                        "채팅방 이름이 변경되었습니다.");
+                        "채팅방 이름이 '" + newName + "'로 변경되었습니다.");
             } else {
                 showAlert(Alert.AlertType.ERROR, "채팅방 이름 변경 실패",
                         updateResult.getMessage());
             }
         }
+    }
+
+    /**
+     * 현재 채팅방의 표시 이름 가져오기
+     */
+    private String getCurrentDisplayName(ChatRoom chatRoom) {
+        List<Member> members = chatService.getChatRoomMembers(chatRoom.getChatRoomId());
+
+        if (!chatRoom.isGroupChat() && members.size() == 2) {
+            // 1:1 채팅의 경우 상대방 이름으로 기본값 설정
+            Member otherMember = members.stream()
+                    .filter(member -> member.getMemberId() != currentUser.getMemberId())
+                    .findFirst()
+                    .orElse(null);
+
+            if (otherMember != null) {
+                return otherMember.getNickname() + "님과의 대화";
+            }
+        } else if (chatRoom.isGroupChat()) {
+            // 그룹 채팅의 경우
+            String originalName = chatRoom.getChatRoomName();
+
+            // 자동 생성된 이름이면 현재 멤버 기준으로 생성
+            if (originalName.endsWith("의 그룹채팅")) {
+                List<String> nicknames = members.stream()
+                        .map(Member::getNickname)
+                        .sorted()
+                        .collect(java.util.stream.Collectors.toList());
+                return String.join(", ", nicknames) + "의 그룹채팅";
+            } else {
+                // 사용자 정의 이름은 그대로
+                return originalName;
+            }
+        }
+
+        return chatRoom.getChatRoomName();
     }
 
     /**
@@ -326,7 +375,7 @@ public class ChatRoomsView extends VBox {
     }
 
     /**
-     * 채팅방 정보를 표시하는 커스텀 리스트 셀
+     * 채팅방 정보를 표시하는 커스텀 리스트 셀 - 동적 이름 표시 기능 추가
      */
     private class ChatRoomListCell extends ListCell<ChatRoom> {
         @Override
@@ -337,37 +386,14 @@ public class ChatRoomsView extends VBox {
                 setText(null);
                 setGraphic(null);
                 setContextMenu(null);
+                setOnMouseClicked(null);
             } else {
                 // 채팅방 정보 표시 레이아웃
                 VBox vbox = new VBox(5);
                 vbox.setPadding(new Insets(8));
 
-                // 채팅방 이름 (1:1 채팅인 경우 상대방 이름으로 표시)
-                String displayName = chatRoom.getChatRoomName();
-
-                if (!chatRoom.isGroupChat()) {
-                    // 1:1 채팅방인 경우 이름 포맷을 확인
-                    String originalName = chatRoom.getChatRoomName();
-                    if (originalName.startsWith("1:1_")) {
-                        // "1:1_멤버ID1_멤버ID2" 형식에서 상대방 ID 추출
-                        String[] parts = originalName.split("_");
-                        if (parts.length == 3) {
-                            int id1 = Integer.parseInt(parts[1]);
-                            int id2 = Integer.parseInt(parts[2]);
-
-                            // 상대방 ID 결정
-                            int targetId = (id1 == currentUser.getMemberId()) ? id2 : id1;
-
-                            // 상대방 정보 조회
-                            MemberRepository memberRepo = new MemberRepository();
-                            Optional<Member> targetMember = memberRepo.findById(targetId);
-
-                            if (targetMember.isPresent()) {
-                                displayName = targetMember.get().getNickname() + "님과의 대화";
-                            }
-                        }
-                    }
-                }
+                // 동적 채팅방 이름 생성
+                String displayName = generateDisplayName(chatRoom);
 
                 Label nameLabel = new Label(displayName);
                 nameLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 14px;");
@@ -393,12 +419,62 @@ public class ChatRoomsView extends VBox {
                     vbox.getChildren().addAll(nameLabel, typeLabel, previewLabel);
                 }
 
+                setText(null);
+                setGraphic(vbox);
+
                 // 컨텍스트 메뉴 설정
                 setContextMenu(createChatRoomContextMenu(chatRoom));
 
-                setText(null);
-                setGraphic(vbox);
+                // 마우스 클릭 이벤트 처리 - 중요한 부분!
+                setOnMouseClicked(event -> {
+                    if (event.getButton() == javafx.scene.input.MouseButton.PRIMARY && event.getClickCount() == 1) {
+                        // 좌클릭 시에만 채팅방 선택
+                        if (onChatRoomSelectedCallback != null) {
+                            onChatRoomSelectedCallback.accept(chatRoom);
+                        }
+                    }
+                    // 우클릭은 컨텍스트 메뉴가 자동으로 처리
+                });
             }
         }
+
+        /**
+         * 채팅방의 동적 표시 이름 생성
+         */
+        private String generateDisplayName(ChatRoom chatRoom) {
+            List<Member> members = chatService.getChatRoomMembers(chatRoom.getChatRoomId());
+
+            if (!chatRoom.isGroupChat() && members.size() == 2) {
+                // 1:1 채팅 - 상대방 이름으로 표시
+                Member otherMember = members.stream()
+                        .filter(member -> member.getMemberId() != currentUser.getMemberId())
+                        .findFirst()
+                        .orElse(null);
+
+                if (otherMember != null) {
+                    return otherMember.getNickname() + "님과의 대화";
+                }
+            } else if (chatRoom.isGroupChat()) {
+                // 그룹 채팅 이름 확인
+                String originalName = chatRoom.getChatRoomName();
+
+                // 자동 생성된 이름인지 확인 (끝에 "의 그룹채팅"이 있으면)
+                if (originalName.endsWith("의 그룹채팅")) {
+                    // 현재 멤버로 새로운 이름 생성
+                    List<String> nicknames = members.stream()
+                            .map(Member::getNickname)
+                            .sorted()
+                            .collect(java.util.stream.Collectors.toList());
+                    return String.join(", ", nicknames) + "의 그룹채팅";
+                } else {
+                    // 사용자가 직접 설정한 이름은 그대로 표시
+                    return originalName;
+                }
+            }
+
+            // 기본값 - 원래 이름 그대로
+            return chatRoom.getChatRoomName();
+        }
     }
+
 }
