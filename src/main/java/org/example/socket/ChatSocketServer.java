@@ -207,7 +207,7 @@ public class ChatSocketServer {
     }
 
     /**
-     * 사용자가 채팅방에 입장함을 알림
+     * 사용자가 채팅방에 입장함을 알림 - 입장 메시지 제거
      */
     public void notifyChatRoomJoin(int chatRoomId, int memberId) {
         List<Integer> members = chatRoomMembers.get(chatRoomId);
@@ -220,24 +220,11 @@ public class ChatSocketServer {
             members.add(memberId);
         }
 
-        // 입장 메시지 생성
-        MemberRepository memberRepo = new MemberRepository();
-        Member member = memberRepo.findById(memberId).orElse(null);
-        String nickname = member != null ? member.getNickname() : "알 수 없는 사용자";
-
-        ChatMessage joinMessage = new ChatMessage(
-                ChatMessageType.SYSTEM,
-                chatRoomId,
-                -1, // 시스템 메시지는 송신자 ID가 -1
-                nickname + "님이 입장했습니다.",
-                new Timestamp(System.currentTimeMillis())
-        );
-
-        broadcastMessage(joinMessage);
+        // 입장 메시지는 더 이상 전송하지 않음
     }
 
     /**
-     * 사용자가 채팅방에서 퇴장함을 알림
+     * 사용자가 채팅방에서 퇴장함을 알림 - 퇴장 메시지 제거
      */
     public void notifyChatRoomLeave(int chatRoomId, int memberId) {
         List<Integer> members = chatRoomMembers.get(chatRoomId);
@@ -247,23 +234,9 @@ public class ChatSocketServer {
             // 채팅방에 아무도 없으면 목록에서 제거
             if (members.isEmpty()) {
                 chatRoomMembers.remove(chatRoomId);
-                return;
             }
 
-            // 퇴장 메시지 생성
-            MemberRepository memberRepo = new MemberRepository();
-            Member member = memberRepo.findById(memberId).orElse(null);
-            String nickname = member != null ? member.getNickname() : "알 수 없는 사용자";
-
-            ChatMessage leaveMessage = new ChatMessage(
-                    ChatMessageType.SYSTEM,
-                    chatRoomId,
-                    -1, // 시스템 메시지는 송신자 ID가 -1
-                    nickname + "님이 퇴장했습니다.",
-                    new Timestamp(System.currentTimeMillis())
-            );
-
-            broadcastMessage(leaveMessage);
+            // 퇴장 메시지는 더 이상 전송하지 않음
         }
     }
 
