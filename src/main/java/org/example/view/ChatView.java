@@ -317,7 +317,7 @@ public class ChatView extends BorderPane {
     }
 
     /**
-     * 소켓으로부터 수신된 메시지 처리 - 스크롤 문제 해결
+     * 소켓으로부터 수신된 메시지 처리 - 날짜 구분선 중복 문제 해결
      */
     private void handleIncomingMessage(ChatMessage chatMessage) {
         Platform.runLater(() -> {
@@ -331,17 +331,28 @@ public class ChatView extends BorderPane {
             // 날짜가 바뀌면 날짜 구분선 추가
             String messageDate = dateFormat.format(message.getCreatedAt());
 
-            // 마지막 메시지가 다른 날짜인지 확인
+            // 이미 같은 날짜의 구분선이 있는지 확인 - 수정된 로직
             boolean needDateSeparator = true;
             if (!messagesContainer.getChildren().isEmpty()) {
-                // 마지막 노드가 날짜 구분선인지 확인
-                Node lastNode = messagesContainer.getChildren().get(messagesContainer.getChildren().size() - 1);
-                if (lastNode instanceof HBox) {
-                    HBox hbox = (HBox) lastNode;
-                    if (!hbox.getChildren().isEmpty() && hbox.getChildren().get(0) instanceof Label) {
-                        Label label = (Label) hbox.getChildren().get(0);
-                        if (label.getText().equals(messageDate)) {
-                            needDateSeparator = false;
+                // 모든 노드를 역순으로 검사하여 가장 최근의 날짜 구분선 찾기
+                for (int i = messagesContainer.getChildren().size() - 1; i >= 0; i--) {
+                    Node node = messagesContainer.getChildren().get(i);
+
+                    // 날짜 구분선인지 확인 (HBox 안에 Label이 있고, 날짜 형식인 경우)
+                    if (node instanceof HBox) {
+                        HBox hbox = (HBox) node;
+                        if (!hbox.getChildren().isEmpty() && hbox.getChildren().get(0) instanceof Label) {
+                            Label label = (Label) hbox.getChildren().get(0);
+                            String labelText = label.getText();
+
+                            // 날짜 형식인지 확인 (yyyy-MM-dd 형식)
+                            if (labelText.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                                // 같은 날짜의 구분선이 이미 있으면 추가하지 않음
+                                if (labelText.equals(messageDate)) {
+                                    needDateSeparator = false;
+                                }
+                                break; // 가장 최근 날짜 구분선을 찾았으므로 종료
+                            }
                         }
                     }
                 }
