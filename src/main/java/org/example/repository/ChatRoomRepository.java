@@ -79,22 +79,27 @@ public class ChatRoomRepository {
         }
     }
 
+    // ChatRoomRepository.java의 getChatRoomsByMemberId 메서드 수정
+
     /**
-     * 사용자가 참여 중인 채팅방 목록 조회
+     * 사용자가 참여 중인 채팅방 목록 조회 - 통합 최신순 정렬
      * @param memberId 사용자 ID
-     * @return 채팅방 목록
+     * @return 채팅방 목록 (최근 활동순)
      */
     public List<ChatRoom> getChatRoomsByMemberId(int memberId) {
-        // MySQL 호환 쿼리로 수정
+        // 채팅방 생성시간과 메시지 시간을 통합해서 가장 최근 활동 기준으로 정렬
         String sql = "SELECT cr.chatroom_id, cr.chatroom_name, cr.is_group_chat, cr.created_at, " +
                 "MAX(m.created_at) as last_message_time, " +
-                "(SELECT m2.message_content FROM Messages m2 WHERE m2.chatroom_id = cr.chatroom_id ORDER BY m2.created_at DESC LIMIT 1) as last_message " +
+                "(SELECT m2.message_content FROM Messages m2 WHERE m2.chatroom_id = cr.chatroom_id ORDER BY m2.created_at DESC LIMIT 1) as last_message, " +
+                // 최근 활동 시간 = 메시지 시간이 있으면 메시지 시간, 없으면 채팅방 생성 시간
+                "CASE WHEN MAX(m.created_at) IS NOT NULL THEN MAX(m.created_at) ELSE cr.created_at END as last_activity " +
                 "FROM ChatRooms cr " +
                 "JOIN ChatRoomMembers crm ON cr.chatroom_id = crm.chatroom_id " +
                 "LEFT JOIN Messages m ON cr.chatroom_id = m.chatroom_id " +
                 "WHERE crm.member_id = ? " +
                 "GROUP BY cr.chatroom_id " +
-                "ORDER BY CASE WHEN MAX(m.created_at) IS NULL THEN 0 ELSE 1 END DESC, MAX(m.created_at) DESC";
+                // 최근 활동 시간 기준으로 내림차순 정렬 (가장 최근이 맨 위)
+                "ORDER BY last_activity DESC";
 
         List<ChatRoom> chatRooms = new ArrayList<>();
 
