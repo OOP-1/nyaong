@@ -250,6 +250,10 @@ public class ChatService {
             return new ChatResult(false, "메시지 내용을 입력해주세요.", chatRoomId);
         }
 
+        if (content.length() > 500) {
+            return new ChatResult(false, "메시지를 500자 이하로 입력해주세요.", chatRoomId);
+        }
+
         // 블록체인 처리 기다리지 않고, 메시지 먼저 저장 (blockchainId는 -1로 임시 저장)
         int msgId = messageRepository.sendMessage(chatRoomId, -1, senderId, content);
 
