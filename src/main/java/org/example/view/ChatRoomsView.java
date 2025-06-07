@@ -94,15 +94,15 @@ public class ChatRoomsView extends VBox {
         topBox.setPadding(new Insets(0, 0, 10, 0));
 
 
-        // 새 그룹 채팅 버튼
-        Button newGroupChatButton = new Button("그룹 채팅");
-        newGroupChatButton.setOnAction(e -> showGroupChatDialog());
+        //  채팅 버튼
+        Button newChatButton = new Button("채팅방 만들기");
+        newChatButton.setOnAction(e -> showGroupChatDialog());
 
         // 새로고침 버튼
         Button refreshButton = new Button("새로고침");
         refreshButton.setOnAction(e -> loadChatRooms());
 
-        topBox.getChildren().addAll(newGroupChatButton, refreshButton);
+        topBox.getChildren().addAll(newChatButton, refreshButton);
         return topBox;
     }
 
