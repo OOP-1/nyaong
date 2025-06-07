@@ -93,9 +93,6 @@ public class ChatRoomsView extends VBox {
         topBox.setAlignment(Pos.CENTER_LEFT);
         topBox.setPadding(new Insets(0, 0, 10, 0));
 
-        // 새 1:1 채팅 버튼
-        Button newPrivateChatButton = new Button("1:1 채팅");
-        newPrivateChatButton.setOnAction(e -> showPrivateChatDialog());
 
         // 새 그룹 채팅 버튼
         Button newGroupChatButton = new Button("그룹 채팅");
@@ -105,7 +102,7 @@ public class ChatRoomsView extends VBox {
         Button refreshButton = new Button("새로고침");
         refreshButton.setOnAction(e -> loadChatRooms());
 
-        topBox.getChildren().addAll(newPrivateChatButton, newGroupChatButton, refreshButton);
+        topBox.getChildren().addAll(newGroupChatButton, refreshButton);
         return topBox;
     }
 
