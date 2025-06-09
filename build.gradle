@@ -1,7 +1,9 @@
 plugins {
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
 }
+
 
 group = 'org.example'
 version = '1.0-SNAPSHOT'
@@ -26,6 +28,12 @@ dependencies {
     implementation 'org.web3j:core:4.10.3'
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+jar {
+    manifest {
+        attributes 'Version': version, 'Main-Class' : 'org.example.App'
+    }
 }
 
 test {
