@@ -1,5 +1,6 @@
 package org.example.socket;
 
+import org.example.config.EnvLoader;
 import org.example.model.Member;
 
 import java.io.EOFException;
@@ -24,8 +25,8 @@ import java.util.function.Consumer;
  * 서버와의 소켓 통신을 관리합니다.
  */
 public class ChatSocketClient {
-    private static final String SERVER_HOST = "localhost";
-    private static final int SERVER_PORT = 9000;
+    private static final String SERVER_HOST = EnvLoader.get("SERVER_HOST");
+    private static final int SERVER_PORT = Integer.parseInt(EnvLoader.get("SERVER_PORT"));
     private static ChatSocketClient instance;
 
     private Socket socket;
